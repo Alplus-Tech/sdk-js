@@ -1,0 +1,60 @@
+{
+  "name": "@alplus/sdk",
+  "version": "0.1.0",
+  "description": "Official instrumentation SDK for Alplus (console.alplus.dev): Monitor heartbeat pings in v0.1, Observe error tracking and Measure custom events land in later 0.x releases.",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "uptime",
+    "cron",
+    "heartbeat",
+    "monitoring",
+    "cloudflare-workers",
+    "healthcheck"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/alplus/sdk"
+  },
+  "homepage": "https://alplus.dev",
+  "bugs": "https://github.com/alplus/sdk/issues",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/browser/index.d.ts",
+      "import": "./dist/browser/index.js"
+    },
+    "./node": {
+      "types": "./dist/node/index.d.ts",
+      "import": "./dist/node/index.js",
+      "require": "./dist/node/index.cjs"
+    },
+    "./cloudflare": {
+      "types": "./dist/cloudflare/index.d.ts",
+      "import": "./dist/cloudflare/index.js"
+    },
+    "./core": {
+      "types": "./dist/core/index.d.ts",
+      "import": "./dist/core/index.js"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json --noEmit && tsup",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "tsup": "^8.3.5",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}
