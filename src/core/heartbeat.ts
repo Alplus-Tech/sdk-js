@@ -14,6 +14,9 @@ const MAX_ATTEMPTS = 3;
 const BACKOFF_BASE_MS = 500;
 const BACKOFF_JITTER = 0.5;
 const MAX_MESSAGE_LENGTH = 2048;
+const MAX_RETRY_AFTER_MS = 30_000;
+const PERMANENT_CLIENT_ERROR_STATUSES: Record<number, true> = { 400: true, 401: true, 403: true, 404: true };
+const PING_ID_PATTERN = /^[A-Za-z0-9_.-]{1,128}$/;
 
 export interface HeartbeatOptions {
   /** Explicit ping state. Mutually exclusive with `exitCode`. */
@@ -22,7 +25,7 @@ export interface HeartbeatOptions {
   exitCode?: number;
   /** Diagnostic message attached to fail pings, truncated silently to 2048 chars. */
   message?: string;
-  /** Idempotency id reused across retries. Defaults to a fresh client-generated id. */
+  /** Idempotency id reused across retries. Invalid custom values fall back to a fresh client-generated id. */
   pingId?: string;
   /** Override ingest origin. Defaults to https://ingest.alplus.dev. */
   baseUrl?: string;
@@ -97,19 +100,29 @@ function backoffMs(attempt: number): number {
   return exponential * jitterFactor;
 }
 
+function retryAfterMs(response: Response): number | null {
+  const retryAfter = response.headers.get("Retry-After");
+  if (retryAfter === null || retryAfter.trim() === "") return null;
+
+  const seconds = Number(retryAfter);
+  if (!Number.isFinite(seconds) || seconds < 0) return null;
+
+  return Math.min(seconds * 1000, MAX_RETRY_AFTER_MS);
+}
+
 /**
- * Sends a single heartbeat ping (docs/sdk/01-sdk-spec.md section 3.5).
- *
- * Never throws or rejects: internal errors, network failures, and non-ok
- * responses are retried up to 3 attempts total with jittered exponential
- * backoff, then swallowed (optionally logged via `options.debug`). The
+ * Never throws or rejects: internal errors, network failures, and retryable
+ * non-ok responses are retried up to 3 attempts total. Permanent 400, 401,
+ * 403, and 404 responses are swallowed without a retry; 429 honors a
+ * Retry-After delay capped at 30 seconds. Other retries use jittered
+ * exponential backoff, and are optionally logged via `options.debug`. The
  * same `pingId` is reused across every attempt so the ingest worker can
  * dedupe retried pings of the same logical event.
  */
 export async function heartbeat(token: string, options: HeartbeatOptions = {}): Promise<void> {
   const debug = options.debug ?? false;
   try {
-    const pingId = options.pingId ?? generatePingId();
+    const pingId = options.pingId !== undefined && PING_ID_PATTERN.test(options.pingId) ? options.pingId : generatePingId();
     const url = buildPingUrl(token, { ...options, pingId });
     const fetchImpl = options.fetchImpl ?? globalThis.fetch;
 
@@ -126,6 +139,12 @@ export async function heartbeat(token: string, options: HeartbeatOptions = {}): 
         const response = await fetchImpl(url, { method: "POST" });
         if (response.ok) return;
         lastError = new Error(`heartbeat ping responded with status ${response.status}`);
+        if (PERMANENT_CLIENT_ERROR_STATUSES[response.status]) return;
+
+        if (attempt < MAX_ATTEMPTS) {
+          await delay(response.status === 429 ? retryAfterMs(response) ?? backoffMs(attempt) : backoffMs(attempt));
+        }
+        continue;
       } catch (err) {
         lastError = err;
       }

@@ -6,8 +6,8 @@ function okResponse(): Response {
   return { ok: true, status: 200 } as Response;
 }
 
-function errorResponse(status: number): Response {
-  return { ok: false, status } as Response;
+function errorResponse(status: number, retryAfter?: string): Response {
+  return { ok: false, status, headers: new Headers(retryAfter === undefined ? undefined : { "Retry-After": retryAfter }) } as Response;
 }
 
 describe("buildPingUrl", () => {
@@ -116,6 +116,58 @@ describe("heartbeat", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
+  it("caps a 429 Retry-After delay at 30 seconds", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(0.5);
+    const fetchImpl = vi.fn().mockResolvedValueOnce(errorResponse(429, "45")).mockResolvedValueOnce(okResponse());
+
+    const promise = heartbeat("hb_abc123", { fetchImpl });
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(29_999);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(1);
+    await promise;
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it("uses the default retry delay for an unparseable 429 Retry-After value", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(0.5);
+    const fetchImpl = vi.fn().mockResolvedValueOnce(errorResponse(429, "later")).mockResolvedValueOnce(okResponse());
+
+    const promise = heartbeat("hb_abc123", { fetchImpl });
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(499);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(1);
+    await promise;
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it("uses the default retry delay when a 429 Retry-After header is missing", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(0.5);
+    const fetchImpl = vi.fn().mockResolvedValueOnce(errorResponse(429)).mockResolvedValueOnce(okResponse());
+
+    const promise = heartbeat("hb_abc123", { fetchImpl });
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(499);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(1);
+    await promise;
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([400, 401, 403, 404])("does not retry a permanent %i response", async (status) => {
+    const fetchImpl = vi.fn().mockResolvedValue(errorResponse(status));
+
+    const promise = heartbeat("hb_abc123", { fetchImpl });
+    await vi.runAllTimersAsync();
+    await promise;
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
   it("logs via console.warn on final failure only when debug is true", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const fetchImpl = vi.fn().mockRejectedValue(new Error("network down"));
@@ -145,6 +197,25 @@ describe("heartbeat", () => {
     const url = new URL(fetchImpl.mock.calls[0]![0] as string);
     expect(url.pathname).toBe("/h/hb_abc123/1");
     expect(url.searchParams.get("msg")).toBe("disk full");
+  });
+
+  it.each(["bad/ping-id", "x".repeat(129)])("replaces invalid custom pingId %j with a generated id", async (pingId) => {
+    const fetchImpl = vi.fn().mockResolvedValue(okResponse());
+
+    await heartbeat("hb_abc123", { fetchImpl, pingId });
+
+    const sentPingId = new URL(fetchImpl.mock.calls[0]![0] as string).searchParams.get("ping_id");
+    expect(sentPingId).toMatch(/^[A-Za-z0-9_.-]{1,128}$/);
+    expect(sentPingId).not.toBe(pingId);
+  });
+
+  it("preserves a valid custom pingId", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(okResponse());
+
+    await heartbeat("hb_abc123", { fetchImpl, pingId: "cron.finish-1" });
+
+    const sentPingId = new URL(fetchImpl.mock.calls[0]![0] as string).searchParams.get("ping_id");
+    expect(sentPingId).toBe("cron.finish-1");
   });
 
   it("never rejects even when no fetch implementation is available", async () => {
