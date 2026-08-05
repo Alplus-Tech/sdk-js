@@ -111,6 +111,45 @@ function retryAfterMs(response: Response): number | null {
 }
 
 /**
+ * The three ways a ping run ends, kept distinct because they are logged
+ * differently: only `exhausted` is worth warning about. A `permanent`
+ * response (400/401/403/404) means the token or request is wrong and
+ * retrying cannot help, so it is swallowed without the "exhausted N
+ * attempts" noise that would otherwise imply a transient fault.
+ */
+type PingOutcome = { outcome: "sent" } | { outcome: "permanent" } | { outcome: "exhausted"; lastError: unknown };
+
+/**
+ * Runs the retry schedule. The same `url` (and therefore the same `pingId`)
+ * is reused on every attempt so the ingest side dedupes retries of one
+ * logical event rather than recording several.
+ */
+async function pingWithRetries(url: string, fetchImpl: typeof fetch): Promise<PingOutcome> {
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      const response = await fetchImpl(url, { method: "POST" });
+      if (response.ok) return { outcome: "sent" };
+
+      lastError = new Error(`heartbeat ping responded with status ${response.status}`);
+      if (PERMANENT_CLIENT_ERROR_STATUSES[response.status]) return { outcome: "permanent" };
+
+      if (attempt < MAX_ATTEMPTS) {
+        await delay(response.status === 429 ? retryAfterMs(response) ?? backoffMs(attempt) : backoffMs(attempt));
+      }
+      continue;
+    } catch (err) {
+      lastError = err;
+    }
+
+    if (attempt < MAX_ATTEMPTS) await delay(backoffMs(attempt));
+  }
+
+  return { outcome: "exhausted", lastError };
+}
+
+/**
  * Never throws or rejects: internal errors, network failures, and retryable
  * non-ok responses are retried up to 3 attempts total. Permanent 400, 401,
  * 403, and 404 responses are swallowed without a retry; 429 honors a
@@ -133,28 +172,9 @@ export async function heartbeat(token: string, options: HeartbeatOptions = {}): 
       return;
     }
 
-    let lastError: unknown;
-    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-      try {
-        const response = await fetchImpl(url, { method: "POST" });
-        if (response.ok) return;
-        lastError = new Error(`heartbeat ping responded with status ${response.status}`);
-        if (PERMANENT_CLIENT_ERROR_STATUSES[response.status]) return;
-
-        if (attempt < MAX_ATTEMPTS) {
-          await delay(response.status === 429 ? retryAfterMs(response) ?? backoffMs(attempt) : backoffMs(attempt));
-        }
-        continue;
-      } catch (err) {
-        lastError = err;
-      }
-      if (attempt < MAX_ATTEMPTS) {
-        await delay(backoffMs(attempt));
-      }
-    }
-
-    if (debug) {
-      console.warn(`[@alplus/sdk] heartbeat: exhausted ${MAX_ATTEMPTS} attempts (token "${token}")`, lastError);
+    const result = await pingWithRetries(url, fetchImpl);
+    if (debug && result.outcome === "exhausted") {
+      console.warn(`[@alplus/sdk] heartbeat: exhausted ${MAX_ATTEMPTS} attempts (token "${token}")`, result.lastError);
     }
   } catch (err) {
     // Belt-and-suspenders: guarantees the "never throw into the host app"
