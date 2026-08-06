@@ -1,0 +1,87 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { __resetForTests, captureException } from "../core/observe/client";
+import { __resetForTests as __resetBrowserObserveForTests, init } from "./observe";
+
+/**
+ * The vitest project this package runs under uses `environment: "node"`
+ * (see the root `vitest.config.ts`), so `window`/`navigator` are not real
+ * DOM globals here -- they're stubbed per test with `vi.stubGlobal`. That's
+ * enough to exercise this adapter's own logic (does it register exactly one
+ * listener, does the listener build and send the right keepalive request);
+ * it does not exercise real browser `pagehide`/bfcache behavior, which has
+ * no fidelity in a non-jsdom environment anyway.
+ */
+function fakeWindow() {
+  const listeners: Record<string, Array<() => void>> = {};
+  return {
+    addEventListener: vi.fn((event: string, handler: () => void) => {
+      (listeners[event] ??= []).push(handler);
+    }),
+    fire(event: string) {
+      for (const handler of listeners[event] ?? []) handler();
+    },
+    document: {},
+  };
+}
+
+describe("browser Observe init", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    __resetForTests();
+    __resetBrowserObserveForTests();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("registers a pagehide listener that flushes the queue via fetch keepalive with the Authorization header", async () => {
+    const win = fakeWindow();
+    vi.stubGlobal("window", win);
+    const fetchImpl = vi.fn().mockResolvedValue({ ok: true, status: 202, headers: new Headers() } as Response);
+    vi.stubGlobal("fetch", fetchImpl);
+
+    init({ key: "alp_p_test", fetchImpl });
+    captureException(new Error("boom"));
+
+    win.fire("pagehide");
+    await vi.runAllTimersAsync();
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    const [url, requestInit] = fetchImpl.mock.calls[0]! as [string, RequestInit];
+    expect(url).toBe("https://ingest.alplus.dev/e/errors");
+    expect(requestInit.keepalive).toBe(true);
+    expect((requestInit.headers as Record<string, string>).Authorization).toBe("Bearer alp_p_test");
+  });
+
+  it("does not send anything on pagehide when the queue is empty", async () => {
+    const win = fakeWindow();
+    vi.stubGlobal("window", win);
+    const fetchImpl = vi.fn().mockResolvedValue({ ok: true, status: 202, headers: new Headers() } as Response);
+    vi.stubGlobal("fetch", fetchImpl);
+
+    init({ key: "alp_p_test", fetchImpl });
+    win.fire("pagehide");
+    await vi.runAllTimersAsync();
+
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("registers only one pagehide listener across repeated init() calls", () => {
+    const win = fakeWindow();
+    vi.stubGlobal("window", win);
+    const fetchImpl = vi.fn().mockResolvedValue({ ok: true, status: 202, headers: new Headers() } as Response);
+
+    init({ key: "alp_p_first", fetchImpl });
+    init({ key: "alp_p_second", fetchImpl });
+
+    expect(win.addEventListener).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not throw when there is no window global at all", () => {
+    vi.stubGlobal("window", undefined);
+    expect(() => init({ key: "alp_p_test", fetchImpl: vi.fn() })).not.toThrow();
+  });
+});

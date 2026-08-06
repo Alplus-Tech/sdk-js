@@ -7,10 +7,11 @@ import { defineConfig } from "tsup";
  * self-contained -- no cross-bundle relative imports at runtime, even though
  * the adapters re-export from ../core in source.
  *
- * v0.1.0 ships only the neutral/node/cloudflare/core ESM(+CJS for node)
- * outputs; no IIFE build yet (heartbeat is server-side only in this
- * release, see README scope note) -- that lands with the browser Observe
- * SDK per the spec's section 1 IIFE requirement, out of scope here.
+ * Ships only the neutral/node/cloudflare/core ESM(+CJS for node) outputs;
+ * no IIFE/UMD build yet. That ships alongside automatic browser
+ * instrumentation (window.onerror etc.), which v0.2.x does not implement --
+ * see README's scope note. Until then, browser consumers are expected to
+ * use a bundler or `<script type="module">`.
  */
 export default defineConfig([
   {
