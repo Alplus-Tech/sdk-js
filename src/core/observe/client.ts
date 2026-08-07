@@ -14,6 +14,7 @@
 
 import { generateEventId } from "../id";
 import { SDK_NAME, SDK_VERSION } from "../version";
+import { __resetDedupForTests, resolveDedupId } from "./dedup";
 import {
   BATCH_FLUSH_MS,
   BATCH_MAX_BYTES,
@@ -23,14 +24,33 @@ import {
   MAX_EXCEPTION_VALUE_CHARS,
   MAX_MESSAGE_CHARS,
   MAX_STACK_TRACE_CHARS,
+  MAX_TAGS_CHARS,
+  SERVER_MAX_BREADCRUMBS,
   capContext,
   capFrames,
   capText,
   type ErrorLevel,
   type WireErrorItem,
 } from "./envelope";
+import { mergeScope, type ScopeOverrides, type ScopeSnapshot } from "./scope";
 import { parseStack } from "./stack";
 import { delay, postJsonWithRetries } from "./transport";
+
+/**
+ * Registered once by a platform adapter that has an ambient scope to offer
+ * (browser: a module-global singleton; Node: the active
+ * `AsyncLocalStorage` context). Cloudflare registers none -- every capture
+ * there must pass `user`/`tags`/`contexts`/`breadcrumbs` explicitly (see
+ * `./scope.ts`'s file comment for why). Module-level and independent of
+ * `state` so it survives `init()` being called again.
+ */
+type ScopeProvider = () => ScopeSnapshot;
+let scopeProvider: ScopeProvider | null = null;
+
+/** Adapter-internal wiring, not part of the public platform surface -- called once from each adapter module, never by application code. */
+export function setScopeProvider(provider: ScopeProvider | null): void {
+  scopeProvider = provider;
+}
 
 const DEFAULT_BASE_URL = "https://ingest.alplus.dev";
 const DEFAULT_FLUSH_TIMEOUT_MS = 2_000;
@@ -58,12 +78,44 @@ export interface ObserveInitOptions {
    * Default `5000`.
    */
   autoFlushIntervalMs?: number;
+  /**
+   * Automatic global error capture (docs/sdk/02-dx-improvements.md section
+   * 2): `window.onerror`/`onunhandledrejection` in the browser,
+   * `process.on("uncaughtException"/"unhandledRejection")` in Node. Default
+   * `true` on both. Cloudflare has no process-global hooks to attach, so its
+   * `init` ignores this option entirely -- use `wrapHandler`/`wrapScheduled`
+   * from `@alplus/sdk/cloudflare` instead.
+   */
+  captureUnhandled?: boolean;
+  /**
+   * Breadcrumb ring buffer capacity (docs/sdk/02-dx-improvements.md section
+   * 3). Default 30. Only meaningful on adapters that carry an ambient
+   * breadcrumb trail (browser, Node); Cloudflare has none to size.
+   */
+  maxBreadcrumbs?: number;
 }
 
-export interface CaptureExceptionOptions {
+/**
+ * Scope overrides accepted by both `captureException` and `captureMessage`,
+ * on top of whichever ambient scope the platform adapter provides (none, on
+ * Cloudflare -- see `./scope.ts`). `mechanism` defaults to `"generic"` for a
+ * direct call; the browser/Node/Cloudflare auto-capture paths pass their own
+ * value (`"onerror"`, `"uncaughtException"`, `"instrumentation"`, etc, per
+ * docs/sdk/02-dx-improvements.md section 2) through this same option rather
+ * than a separate code path, which is also what makes dedup (section 2,
+ * "Deduplicate") work for free: an auto-captured error and a manually
+ * captured one for the same object both flow through `captureException`.
+ */
+export interface CaptureScopeOptions extends ScopeOverrides {
+  mechanism?: string;
+}
+
+export interface CaptureExceptionOptions extends CaptureScopeOptions {
   /** Arbitrary structured data local to this one capture, merged into the event's `contexts.extra`. */
   context?: Record<string, unknown>;
 }
+
+export type CaptureMessageOptions = CaptureScopeOptions;
 
 interface ObserveState {
   key: string;
@@ -238,16 +290,41 @@ function safeStringifyThrown(value: unknown): string {
   }
 }
 
-function mergeContext(userContext: Record<string, unknown> | undefined, nonErrorValue: unknown): Record<string, unknown> | undefined {
-  if (userContext === undefined && nonErrorValue === undefined) return undefined;
-  const extra: Record<string, unknown> = { ...userContext };
-  if (nonErrorValue !== undefined) extra.non_error_value = nonErrorValue;
-  return capContext({ extra }, MAX_CONTEXT_CHARS);
+/** Caps a tags object by serialized size; drops it (with a debug warning) rather than send a truncated `Record<string, string>` that would no longer parse as one. */
+function capTags(tags: Record<string, string> | undefined, s: ObserveState): Record<string, string> | undefined {
+  if (tags === undefined || Object.keys(tags).length === 0) return undefined;
+  if (new TextEncoder().encode(JSON.stringify(tags)).byteLength <= MAX_TAGS_CHARS) return tags;
+  if (s.debug) debugWarn("observe: dropping oversized tags object (over MAX_TAGS_CHARS)");
+  return undefined;
+}
+
+/**
+ * Resolves the scope fields (`contexts`, `tags`, `user`, `breadcrumbs`)
+ * shared by both `captureException` and `captureMessage`: merges whichever
+ * ambient scope the platform adapter provides (`scopeProvider`, none on
+ * Cloudflare) with this capture's explicit overrides, folds `extraContext`
+ * (the `context` option / a non-Error's preserved value) into
+ * `contexts.extra`, and applies the same write-boundary caps the server
+ * enforces so an oversized scope is trimmed here rather than discovered as
+ * a 413.
+ */
+function resolveScopeFields(
+  options: CaptureScopeOptions | undefined,
+  extraContext: Record<string, unknown> | undefined,
+  s: ObserveState,
+): Pick<WireErrorItem, "contexts" | "tags" | "user" | "breadcrumbs"> {
+  const ambient = scopeProvider !== null ? scopeProvider() : undefined;
+  const merged = mergeScope(ambient, options);
+  const namedContexts: Record<string, unknown> = { ...merged.contexts };
+  if (extraContext !== undefined) namedContexts.extra = extraContext;
+  const contexts = Object.keys(namedContexts).length > 0 ? capContext(namedContexts, MAX_CONTEXT_CHARS) : undefined;
+  const breadcrumbs = merged.breadcrumbs.length > 0 ? merged.breadcrumbs.slice(-SERVER_MAX_BREADCRUMBS) : undefined;
+  return { contexts, tags: capTags(merged.tags, s), user: merged.user, breadcrumbs };
 }
 
 function buildExceptionItem(id: string, error: unknown, options: CaptureExceptionOptions | undefined, s: ObserveState): WireErrorItem {
   const normalized = normalizeError(error);
-  const contexts = mergeContext(options?.context, normalized.nonErrorValue);
+  const scoped = resolveScopeFields(options, mergeContext(options?.context, normalized.nonErrorValue), s);
   return {
     id,
     type: "exception",
@@ -260,9 +337,19 @@ function buildExceptionItem(id: string, error: unknown, options: CaptureExceptio
       value: capText(normalized.value, MAX_EXCEPTION_VALUE_CHARS),
       ...(normalized.frames.length > 0 ? { stacktrace: { frames: capFrames(normalized.frames, MAX_STACK_TRACE_CHARS) } } : {}),
     },
-    ...(contexts !== undefined ? { contexts } : {}),
-    mechanism: "generic",
+    ...(scoped.contexts !== undefined ? { contexts: scoped.contexts } : {}),
+    ...(scoped.tags !== undefined ? { tags: scoped.tags } : {}),
+    ...(scoped.user !== undefined ? { user: scoped.user } : {}),
+    ...(scoped.breadcrumbs !== undefined ? { breadcrumbs: scoped.breadcrumbs } : {}),
+    mechanism: options?.mechanism ?? "generic",
   };
+}
+
+function mergeContext(userContext: Record<string, unknown> | undefined, nonErrorValue: unknown): Record<string, unknown> | undefined {
+  if (userContext === undefined && nonErrorValue === undefined) return undefined;
+  const extra: Record<string, unknown> = { ...userContext };
+  if (nonErrorValue !== undefined) extra.non_error_value = nonErrorValue;
+  return extra;
 }
 
 /**
@@ -272,10 +359,21 @@ function buildExceptionItem(id: string, error: unknown, options: CaptureExceptio
  * event id synchronously, even if `init` hasn't been called yet or the
  * client is closed -- the id is always safe to show a user, whether or not
  * the event was actually queued. Never throws.
+ *
+ * Deduplicates: the same error object (or, for a primitive throw, the same
+ * value) captured again within a short window returns the FIRST call's id
+ * and is not re-queued -- see `./dedup.ts`. This is what makes automatic
+ * global capture safe to use alongside manual `captureException` calls for
+ * the same error without double-reporting it.
  */
 export function captureException(error: unknown, options?: CaptureExceptionOptions): string {
-  const id = generateEventId();
+  const freshId = generateEventId();
+  const { id, isDuplicate } = resolveDedupId(error, freshId);
   try {
+    if (isDuplicate) {
+      if (state?.debug === true) debugWarn("captureException(): duplicate error suppressed within the dedup window.", id);
+      return id;
+    }
     if (state === null) return id;
     if (state.closed) {
       if (state.debug) debugWarn("captureException() called after close(); event dropped.", id);
@@ -293,7 +391,7 @@ export function captureException(error: unknown, options?: CaptureExceptionOptio
  * `"info"`. Returns the client-generated event id synchronously. Never
  * throws.
  */
-export function captureMessage(message: string, level: ErrorLevel = "info"): string {
+export function captureMessage(message: string, level: ErrorLevel = "info", options?: CaptureMessageOptions): string {
   const id = generateEventId();
   try {
     if (state === null) return id;
@@ -301,6 +399,7 @@ export function captureMessage(message: string, level: ErrorLevel = "info"): str
       if (state.debug) debugWarn("captureMessage() called after close(); event dropped.", id);
       return id;
     }
+    const scoped = resolveScopeFields(options, undefined, state);
     enqueue(state, {
       id,
       type: "message",
@@ -309,7 +408,11 @@ export function captureMessage(message: string, level: ErrorLevel = "info"): str
       release: state.release,
       environment: state.environment,
       message: capText(message, MAX_MESSAGE_CHARS),
-      mechanism: "generic",
+      ...(scoped.contexts !== undefined ? { contexts: scoped.contexts } : {}),
+      ...(scoped.tags !== undefined ? { tags: scoped.tags } : {}),
+      ...(scoped.user !== undefined ? { user: scoped.user } : {}),
+      ...(scoped.breadcrumbs !== undefined ? { breadcrumbs: scoped.breadcrumbs } : {}),
+      mechanism: options?.mechanism ?? "generic",
     });
   } catch (err) {
     if (state?.debug === true) debugWarn("captureMessage() failed internally; event dropped.", err);
@@ -379,4 +482,5 @@ export function buildKeepaliveFlushRequest(): { url: string; body: string; heade
 export function __resetForTests(): void {
   if (state !== null) clearTimer(state);
   state = null;
+  __resetDedupForTests();
 }

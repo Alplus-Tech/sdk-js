@@ -22,6 +22,20 @@ export const MAX_MESSAGE_CHARS = 4_096;
 export const MAX_EXCEPTION_VALUE_CHARS = 4_096;
 export const MAX_STACK_TRACE_CHARS = 16_384;
 export const MAX_CONTEXT_CHARS = 8_192;
+export const MAX_TAGS_CHARS = 4_096;
+/**
+ * SDK-side ring buffer default (docs/sdk/02-dx-improvements.md section 3):
+ * smaller than the server's own 100-breadcrumb ceiling
+ * (`packages/schemas/src/observe/error-envelope.ts`'s `MAX_BREADCRUMBS`) on
+ * purpose -- a trail this long is already more than enough to reconstruct
+ * what led to a capture, and keeping it short bounds both memory and the
+ * per-event payload size. `maxBreadcrumbs` on `init` overrides it.
+ */
+export const DEFAULT_MAX_BREADCRUMBS = 30;
+/** Server ceiling (`error-envelope.ts`'s own `MAX_BREADCRUMBS`) -- a defensive cap applied when merging ambient + per-capture breadcrumbs, never expected to bind given the ring buffer default above. */
+export const SERVER_MAX_BREADCRUMBS = 100;
+export const MAX_BREADCRUMB_MESSAGE_CHARS = 2_048;
+export const MAX_BREADCRUMB_CATEGORY_CHARS = 128;
 
 /**
  * SDK-side batching thresholds (not a server cap): the in-memory queue is
@@ -53,6 +67,21 @@ export interface WireStackFrame {
   in_app?: boolean;
 }
 
+/** Mirrors the server's `breadcrumbSchema` (`packages/schemas/src/observe/error-envelope.ts`). */
+export interface WireBreadcrumb {
+  category?: string;
+  message?: string;
+  level?: string;
+  ts?: string;
+  data?: unknown;
+}
+
+/** Mirrors the server's `errorItemSchema.user` (`.strict()`, `id`/`email` only). */
+export interface WireUser {
+  id?: string;
+  email?: string;
+}
+
 export interface WireErrorItem {
   id: string;
   type: "exception" | "message";
@@ -68,6 +97,10 @@ export interface WireErrorItem {
   };
   contexts?: Record<string, unknown>;
   mechanism?: string;
+  breadcrumbs?: WireBreadcrumb[];
+  tags?: Record<string, string>;
+  user?: WireUser;
+  fingerprint?: string[];
 }
 
 /**

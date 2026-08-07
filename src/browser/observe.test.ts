@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { __resetForTests, captureException } from "../core/observe/client";
+import { unregisterAutoBreadcrumbs } from "./auto-breadcrumbs";
+import { unregisterGlobalHandlers } from "./global-handlers";
 import { __resetForTests as __resetBrowserObserveForTests, init } from "./observe";
 
 /**
@@ -17,11 +19,18 @@ function fakeWindow() {
     addEventListener: vi.fn((event: string, handler: () => void) => {
       (listeners[event] ??= []).push(handler);
     }),
+    removeEventListener: vi.fn((event: string, handler: () => void) => {
+      listeners[event] = (listeners[event] ?? []).filter((h) => h !== handler);
+    }),
     fire(event: string) {
       for (const handler of listeners[event] ?? []) handler();
     },
     document: {},
   };
+}
+
+function pagehideCallCount(win: ReturnType<typeof fakeWindow>): number {
+  return win.addEventListener.mock.calls.filter(([event]) => event === "pagehide").length;
 }
 
 describe("browser Observe init", () => {
@@ -30,6 +39,8 @@ describe("browser Observe init", () => {
   });
 
   afterEach(() => {
+    unregisterGlobalHandlers();
+    unregisterAutoBreadcrumbs();
     __resetForTests();
     __resetBrowserObserveForTests();
     vi.useRealTimers();
@@ -77,7 +88,7 @@ describe("browser Observe init", () => {
     init({ key: "alp_p_first", fetchImpl });
     init({ key: "alp_p_second", fetchImpl });
 
-    expect(win.addEventListener).toHaveBeenCalledTimes(1);
+    expect(pagehideCallCount(win)).toBe(1);
   });
 
   it("does not throw when there is no window global at all", () => {

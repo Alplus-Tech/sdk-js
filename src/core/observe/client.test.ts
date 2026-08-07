@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { __resetForTests, captureException, captureMessage, close, flush, init } from "./client";
+import { __resetForTests, captureException, captureMessage, close, flush, init, setScopeProvider } from "./client";
 import { MAX_MESSAGE_CHARS } from "./envelope";
 
 function okResponse(): Response {
@@ -269,5 +269,96 @@ describe("Observe client", () => {
     expect(fetchImpl).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(5_000);
     expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("mechanism defaults to 'generic' for a direct captureException/captureMessage call", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(okResponse());
+    init({ key: "alp_p_test", fetchImpl });
+    captureException(new Error("boom"));
+    captureMessage("hi");
+    await flush();
+    const items = lastBody(fetchImpl).items as Array<Record<string, unknown>>;
+    expect(items[0]!.mechanism).toBe("generic");
+  });
+
+  it("an explicit mechanism option overrides the default (what the auto-capture wrappers use)", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(okResponse());
+    init({ key: "alp_p_test", fetchImpl });
+    captureException(new Error("boom"), { mechanism: "onerror" });
+    await flush();
+    const item = (lastBody(fetchImpl).items as Array<Record<string, unknown>>)[0]!;
+    expect(item.mechanism).toBe("onerror");
+  });
+
+  it("per-capture user/tags/contexts/breadcrumbs options reach the wire item", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(okResponse());
+    init({ key: "alp_p_test", fetchImpl });
+    captureException(new Error("boom"), {
+      user: { id: "u1", email: "jane@example.com" },
+      tags: { plan: "agency" },
+      contexts: { device: { os: "mac" } },
+      breadcrumbs: [{ category: "manual", message: "did a thing" }],
+    });
+    await flush();
+    const item = (lastBody(fetchImpl).items as Array<Record<string, unknown>>)[0]!;
+    expect(item.user).toEqual({ id: "u1", email: "jane@example.com" });
+    expect(item.tags).toEqual({ plan: "agency" });
+    expect((item.contexts as Record<string, unknown>).device).toEqual({ os: "mac" });
+    expect(item.breadcrumbs).toEqual([expect.objectContaining({ category: "manual", message: "did a thing" })]);
+  });
+
+  it("captureMessage also accepts scope options", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(okResponse());
+    init({ key: "alp_p_test", fetchImpl });
+    captureMessage("hello", "info", { user: { id: "u1" }, mechanism: "generic" });
+    await flush();
+    const item = (lastBody(fetchImpl).items as Array<Record<string, unknown>>)[0]!;
+    expect(item.user).toEqual({ id: "u1" });
+  });
+
+  it("an ambient scope provider (registered by a platform adapter) merges into every capture", async () => {
+    setScopeProvider(() => ({ user: { id: "ambient-user" }, tags: { region: "eu" }, breadcrumbs: [{ category: "nav", message: "loaded" }] }));
+    const fetchImpl = vi.fn().mockResolvedValue(okResponse());
+    init({ key: "alp_p_test", fetchImpl });
+    captureException(new Error("boom"));
+    await flush();
+    const item = (lastBody(fetchImpl).items as Array<Record<string, unknown>>)[0]!;
+    expect(item.user).toEqual({ id: "ambient-user" });
+    expect(item.tags).toEqual({ region: "eu" });
+    expect(item.breadcrumbs).toEqual([expect.objectContaining({ category: "nav", message: "loaded" })]);
+    setScopeProvider(null);
+  });
+
+  it("a per-capture user override wins over the ambient scope provider's user", async () => {
+    setScopeProvider(() => ({ user: { id: "ambient-user" } }));
+    const fetchImpl = vi.fn().mockResolvedValue(okResponse());
+    init({ key: "alp_p_test", fetchImpl });
+    captureException(new Error("boom"), { user: { id: "explicit-user" } });
+    await flush();
+    const item = (lastBody(fetchImpl).items as Array<Record<string, unknown>>)[0]!;
+    expect(item.user).toEqual({ id: "explicit-user" });
+    setScopeProvider(null);
+  });
+
+  it("deduplicates: the same Error object captured twice within the dedup window produces exactly ONE queued event and returns the SAME id both times", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(okResponse());
+    init({ key: "alp_p_test", fetchImpl });
+    const error = new Error("boom");
+    const firstId = captureException(error);
+    const secondId = captureException(error);
+    expect(secondId).toBe(firstId);
+    await flush();
+    const items = lastBody(fetchImpl).items as unknown[];
+    expect(items.length).toBe(1);
+  });
+
+  it("does NOT deduplicate two distinct Error objects, even with the same message", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(okResponse());
+    init({ key: "alp_p_test", fetchImpl });
+    captureException(new Error("boom"));
+    captureException(new Error("boom"));
+    await flush();
+    const items = lastBody(fetchImpl).items as unknown[];
+    expect(items.length).toBe(2);
   });
 });

@@ -6,4 +6,4 @@
  * require bundling JSON into every platform build for one string.
  */
 export const SDK_NAME = "@alplus/sdk";
-export const SDK_VERSION = "0.2.0";
+export const SDK_VERSION = "0.3.0";

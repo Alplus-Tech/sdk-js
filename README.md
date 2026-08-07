@@ -4,9 +4,11 @@ Official instrumentation SDK for [Alplus](https://alplus.dev), the
 Cloudflare-native dev toolkit built around three pillars — **Monitor**
 (uptime and heartbeat checks), **Observe** (error tracking), and **Measure**
 (product analytics) — on one platform, one dashboard, and one bill. This
-package ships `heartbeat()` (Monitor), `init`/`captureException`/
-`captureMessage`/`flush`/`close` (Observe), and `sendMeasureHit()` (Measure);
-see [Roadmap](#roadmap) below for what's not here yet.
+package ships `heartbeat()` (Monitor); `init`/`captureException`/
+`captureMessage`/`flush`/`close`, automatic global error capture,
+breadcrumbs, and scope (`setUser`/`setTag`/`setContext`) for Observe; and
+`sendMeasureHit()` (Measure, browser-only as of 0.3.0 — see below). See
+[Roadmap](#roadmap) below for what's not here yet.
 
 ## Install
 
@@ -125,6 +127,8 @@ exhausted (set `debug: true` to log them instead).
 import { init, captureException, captureMessage, flush, close } from "@alplus/sdk/node"; // or ".", "/cloudflare", "/core"
 
 init({ key: "alp_p_your_ingest_key", environment: "production", release: "1.4.2" });
+// That's it -- uncaught exceptions and unhandled rejections are captured
+// automatically from here on (browser and Node; see below for Cloudflare).
 
 try {
   riskyOperation();
@@ -140,27 +144,165 @@ await flush(2000);
 
 `init(options)` configures a single module-scope client (call it once per
 process/isolate; calling it again reinitializes rather than throwing).
-`key` must be a project API key with the `ingest` scope.
+`key` must be a project API key with the `ingest` scope. `captureUnhandled`
+(default `true` on browser/Node) controls automatic capture — see below.
 
 `captureException(error, options?)` accepts any thrown value — an `Error`,
 a string, or anything else JavaScript allows you to `throw`. A non-`Error`
 value is normalized into a synthetic error with the original value
 preserved under `contexts.extra.non_error_value`. `options.context` is
-merged into `contexts.extra`. Returns the client-generated `err_`-prefixed
-event id synchronously, so you can surface it to a user ("reference id
-`err_...`") even before the event is sent.
+merged into `contexts.extra`; `options.user`/`.tags`/`.contexts`/
+`.breadcrumbs` are per-capture scope overrides (see
+[Scope](#scope-setuser-settag-setcontext) below), and `options.mechanism`
+overrides the default `"generic"` (the automatic capture paths set their
+own). Returns the client-generated `err_`-prefixed event id synchronously,
+so you can surface it to a user ("reference id `err_...`") even before the
+event is sent. The same error object captured twice within ~2 seconds (for
+example by both the automatic handler and a manual call) is deduplicated to
+one event and returns the same id both times.
 
-`captureMessage(message, level?)` records a non-exception event; `level`
-defaults to `"info"` and must be one of `"fatal" | "error" | "warning" |
-"info"`.
+`captureMessage(message, level?, options?)` records a non-exception event;
+`level` defaults to `"info"` and must be one of `"fatal" | "error" |
+"warning" | "info"`. `options` accepts the same scope overrides as
+`captureException`.
 
 `flush(timeoutMs?)` (default 2000ms) forces an immediate send and resolves
-`true` if it drained in time. `close(timeoutMs?)` flushes and then makes
-further capture calls no-ops for the rest of the process.
+`true` if it drained in time. `close(timeoutMs?)` detaches automatic
+capture/breadcrumb instrumentation, flushes, and then makes further capture
+calls no-ops for the rest of the process.
 
 Every capture/transport path is wrapped so **the SDK never throws into your
 application** — a malformed capture, a network failure, or an internal bug
-is caught, optionally logged via `debug: true`, and swallowed.
+is caught, optionally logged via `debug: true`, and swallowed. Automatic
+capture never changes your program's own behavior either: the browser still
+logs an uncaught error to the console exactly as it would with no SDK
+installed, and a wrapped Cloudflare handler still re-throws so the Worker's
+own error response still happens.
+
+### Automatic global error capture
+
+Installing the SDK captures errors by default — opt out with
+`captureUnhandled: false`, not opt in.
+
+- **Browser** (`.`): `window.addEventListener("error"
+  /"unhandledrejection")`, attached on `init`, detached on `close()`.
+- **Node** (`/node`): `process.on("uncaughtException"/"unhandledRejection")`.
+  `uncaughtException` captures, flushes (bounded to ~2s so a slow ingest
+  endpoint can't hang shutdown), and then calls `process.exit(1)` itself —
+  Node suppresses its own default crash-and-exit behavior the instant any
+  listener is attached, so this is the only way to reproduce it, not an
+  SDK choice to be more aggressive than Node's default. `unhandledRejection`
+  captures and flushes but deliberately does **not** exit the process, since
+  Node's own default there is configurable (`--unhandled-rejections`) and
+  forcing an exit would change the behavior of an app that set it to
+  `warn`/`none` on purpose.
+- **Cloudflare** (`/cloudflare`): no process-global hooks exist in workerd,
+  so there is no `captureUnhandled` flag to flip here. Wrap your handler(s)
+  instead:
+
+  ```ts
+  import { init, wrapHandler, wrapScheduled } from "@alplus/sdk/cloudflare";
+
+  export default {
+    fetch: wrapHandler(async (request, env, ctx) => {
+      init({ key: env.ALPLUS_KEY, environment: "production" });
+      // application code; a thrown error is captured, flushed via
+      // ctx.waitUntil, and re-thrown -- the Worker's own error response
+      // still happens exactly as it would with no SDK installed.
+      return handleRequest(request);
+    }),
+    scheduled: wrapScheduled(async (controller, env, ctx) => {
+      init({ key: env.ALPLUS_KEY, environment: "production" });
+      await runScheduledTask();
+    }),
+  };
+  ```
+
+Every captured event — automatic or manual — carries `mechanism`:
+`"onerror"`, `"onunhandledrejection"`, `"uncaughtException"`,
+`"unhandledRejection"`, `"instrumentation"` (Cloudflare's wrappers), or
+`"generic"` (a direct `captureException`/`captureMessage` call).
+
+### Breadcrumbs
+
+```ts
+import { addBreadcrumb } from "@alplus/sdk"; // or "/node"
+
+addBreadcrumb({ category: "checkout", message: "clicked pay", level: "info" });
+```
+
+A ring buffer (default 30 entries, `maxBreadcrumbs` on `init`) attached to
+every subsequent captured event, giving a trail of what led up to it. Never
+records input values or request/response bodies, and strips query strings
+from URLs by default — and `data` on any breadcrumb (manual or automatic) is
+scrubbed of `password`/`secret`/`token`/`api_key`-shaped keys the same way
+`context`/`setContext` payloads are.
+
+- **Browser** (`.`): automatic, on by default — navigation
+  (`pushState`/`replaceState`/`popstate`), delegated clicks (a CSS selector
+  only, e.g. `button#submit.btn-primary`, **never** element text), patched
+  `console.log`/`.warn`/`.error`, and patched `fetch` (method, URL with the
+  query string stripped, status, duration). Every patch is reversible on
+  `close()`, composes with a `fetch` your own code already patched (wraps
+  whatever `fetch` currently is, not a reference saved at import time), and
+  a breadcrumb-recording failure never affects the underlying call.
+- **Node** (`/node`): manual `addBreadcrumb` only, scoped the same way
+  `setUser`/etc are — see [Scope](#scope-setuser-settag-setcontext). No
+  automatic `fetch` breadcrumbs yet (a global `fetch` patch writing
+  anywhere other than a request-scoped buffer would reintroduce the same
+  cross-request attribution bug scope avoids).
+- **Cloudflare** (`/cloudflare`): no ambient breadcrumb buffer at all — pass
+  `breadcrumbs: [...]` directly in `captureException`/`captureMessage`'s
+  options for a one-off capture.
+
+### Scope: `setUser`/`setTag`/`setContext`
+
+```ts
+import { setUser, setTag, setContext } from "@alplus/sdk"; // or "/node"
+
+setUser({ id: "user_123", email: "jane@example.com" }); // or null to clear
+setTag("plan", "agency");
+setContext("cart", { items: 3 });
+```
+
+Merged into every subsequent captured event until changed or cleared.
+**How this is scoped differs sharply by platform, and the difference is
+deliberate** — a naive module-global `setUser` is safe in a browser tab (one
+user, no concurrent requests) and a real bug on a server (request A's
+`setUser` would still be set during request B the instant they overlap):
+
+- **Browser** (`.`): a single module-global scope. Correct here.
+- **Node** (`/node`): backed by `AsyncLocalStorage`, active **only** inside
+  `withScope(fn)`:
+
+  ```ts
+  import { withScope, setUser, captureException } from "@alplus/sdk/node";
+
+  async function handleRequest(req: Request) {
+    return withScope(async () => {
+      setUser({ id: req.userId });
+      try {
+        return await process(req);
+      } catch (err) {
+        captureException(err); // attributed to req.userId, not some other
+        // concurrent request's user
+        throw err;
+      }
+    });
+  }
+  ```
+
+  Calling `setUser`/`setTag`/`setContext`/`addBreadcrumb` **outside** an
+  active `withScope` is a no-op (logged in debug mode) — never a
+  module-global write. A single-threaded script can wrap once around its
+  whole body; a request-handling server should wrap per request.
+- **Cloudflare** (`/cloudflare`): no ambient scope API at all — a Workers
+  isolate can serve concurrent requests, and this package cannot assume the
+  `nodejs_compat` flag `AsyncLocalStorage` needs there. Pass
+  `user`/`tags`/`contexts` directly in `captureException`/
+  `captureMessage`'s options instead; this is always safe regardless of
+  isolate concurrency, and it works as an escape hatch on every platform,
+  where an explicit per-capture value overrides the ambient one.
 
 ### Batching and per-platform flush behavior
 
@@ -207,17 +349,25 @@ rather than discovered by a server rejection.
 
 ### What Observe does not do yet
 
-No automatic instrumentation (`window.onerror`, `unhandledRejection`,
-`uncaughtException`, a Cloudflare `wrapHandler`/Hono middleware), no
-breadcrumbs, no `setUser`/`setTag`/`setContext`, no `sampleRate`, no
-`tunnel` proxy option, no browser offline queue, and no source map upload
-tooling. All manual — call `captureException`/`captureMessage` yourself
-wherever you already catch or care about an error.
+No `sampleRate`/`beforeSend`, no `tunnel` proxy option, no browser offline
+queue, no `XMLHttpRequest` breadcrumbs, no automatic Node/Cloudflare `fetch`
+breadcrumbs (manual `addBreadcrumb` covers Node; Cloudflare has no ambient
+breadcrumb buffer at all — pass `breadcrumbs` explicitly per capture), no
+framework helpers (Hono/Express/React), and no source map upload tooling.
+See [Roadmap](#roadmap).
 
 ## Measure: `sendMeasureHit()`
 
+Available from the browser entry point (`@alplus/sdk`) only as of 0.3.0 —
+**not** from `/node` or `/cloudflare`. `POST /m`'s only auth is a real
+browser's own `Origin` header, which neither a Node nor a Workers `fetch`
+call ever carries, so calling this from either of those adapters always
+silently recorded nothing; the exports were removed rather than left as a
+working-looking trap (`docs/sdk/02-dx-improvements.md` section 5). Use the
+first-party `/m.js` browser tracker for anything server-side.
+
 ```ts
-import { sendMeasureHit } from "@alplus/sdk/node"; // or ".", "/cloudflare", "/core"
+import { sendMeasureHit } from "@alplus/sdk"; // browser only
 
 await sendMeasureHit({
   site: "proj_your_project_id",
@@ -228,27 +378,23 @@ await sendMeasureHit({
 ```
 
 This is a low-level, programmatic wrapper around `POST /m` for use
-somewhere a `<script>` tag isn't an option — a server-rendered app, a
-Cloudflare Worker, a batch replay. It is **not** a replacement for Alplus's
-first-party browser tracker script; a real website should load that script
-instead.
+somewhere a `<script>` tag isn't an option in a real browser page — an SPA
+route change, a dynamically-injected form submit handler. It is **not** a
+replacement for Alplus's first-party browser tracker script; a real website
+should load that script instead.
 
-**Read this before calling it from Node or a Workers handler.** `POST /m`
-has no API key: the only gate is the request's `Origin` header, checked
-against your project's allowlisted domains. A real browser attaches that
-header automatically on every POST and JavaScript cannot override it, which
-is what makes it trustworthy as a control. `fetch` in Node.js and in a
-Cloudflare Worker has no such page context, so a call built by this
-function from those environments carries **no** `Origin` header, and the
-server treats that as an automatic, silent reject. The response is always
+`POST /m` has no API key: the only gate is the request's `Origin` header,
+checked against your project's allowlisted domains. A real browser attaches
+that header automatically on every POST and JavaScript cannot override it,
+which is what makes it trustworthy as a control — and is exactly why this
+function is browser-only as of 0.3.0 (see above). The response is always
 `204 No Content` whether the hit was recorded or rejected, by design, so
-there is nothing to inspect to tell the difference — calling this from a
-plain Node script or an unrelated Workers handler will appear to succeed
-while recording nothing, forever.
+there is nothing in the response to tell the difference if your domain
+isn't on the project's allowlist.
 
 This function deliberately does **not** accept an `origin` override to work
-around that. Fabricating an Origin value to get a server-side call past the
-allowlist would defeat the one security control this endpoint has.
+around that. Fabricating an Origin value to get a call past the allowlist
+would defeat the one security control this endpoint has.
 
 | Option | Type | Notes |
 | --- | --- | --- |
@@ -281,15 +427,18 @@ recovering a lost one. Never throws.
 
 ## Roadmap
 
-Not available in `@alplus/sdk@0.2.x` — no stub exports, no
+Not available in `@alplus/sdk@0.3.x` — no stub exports, no
 reserved-but-throwing placeholders. If it isn't documented above, it
 doesn't exist in this package yet:
 
-- Automatic Observe instrumentation: `window.onerror`,
-  `onunhandledrejection`, Node's `uncaughtException`/`unhandledRejection`
-  hooks, and a Cloudflare `wrapHandler`/Hono `onError` middleware.
-- Breadcrumbs, `setUser`, `setTag`, `setContext`, `sampleRate`, the
-  `tunnel` proxy option, and a browser offline queue.
+- `beforeSend`, `sampleRate`, and the `tunnel` proxy option.
+- Framework helpers: `@alplus/sdk/hono`, `/express`, `/react`.
+- Automatic outbound-`fetch` breadcrumbs on Node/Cloudflare, and any ambient
+  breadcrumb/scope API on Cloudflare at all (pass `breadcrumbs`/`user`/
+  `tags`/`contexts` explicitly per capture there instead).
+- `XMLHttpRequest` breadcrumbs (browser `fetch` breadcrumbs ship; XHR does
+  not).
+- A browser offline queue.
 - Source map upload tooling (`alplus-cli sourcemaps upload`).
 - An IIFE/UMD browser build for non-bundler `<script>` tag usage.
 - **Ruby / Rails** — a native `alplus-ruby` gem is the planned integration
@@ -298,11 +447,15 @@ doesn't exist in this package yet:
 
 ## Versioning
 
-This package is `0.x`: minor versions (`0.1` -> `0.2`) may introduce
+This package is `0.x`: minor versions (`0.2` -> `0.3`) may introduce
 breaking changes as new modules land, though `heartbeat()`, `init`,
-`captureException`, `captureMessage`, `flush`, `close`, and
-`sendMeasureHit()` documented here are expected to stay stable going
-forward. Patch versions are always backwards compatible. See
+`captureException`, `captureMessage`, `flush`, and `close` documented here
+are expected to stay stable going forward — 0.3.0's additions
+(automatic capture, breadcrumbs, scope) are all additive on top of that
+surface. `sendMeasureHit()` is no longer exported from `/node`/`/cloudflare`
+as of 0.3.0 (see [Measure](#measure-sendmeasurehit) above) — a breaking
+change made while the package was still unpublished, so it cost nothing.
+Patch versions are always backwards compatible. See
 [GitHub releases](https://github.com/alplus/sdk/releases) for the
 changelog.
 
