@@ -22,15 +22,19 @@ import {
   MAX_CONTEXT_CHARS,
   MAX_ENVELOPE_BYTES,
   MAX_EXCEPTION_VALUE_CHARS,
+  MAX_FINGERPRINT_CHARS,
+  MAX_FINGERPRINT_ENTRIES,
   MAX_MESSAGE_CHARS,
   MAX_STACK_TRACE_CHARS,
   MAX_TAGS_CHARS,
   SERVER_MAX_BREADCRUMBS,
   capContext,
+  capFingerprint,
   capFrames,
   capText,
   type ErrorLevel,
   type WireErrorItem,
+  type WireStackFrame,
 } from "./envelope";
 import { mergeScope, type ScopeOverrides, type ScopeSnapshot } from "./scope";
 import { parseStack } from "./stack";
@@ -108,11 +112,28 @@ export interface ObserveInitOptions {
  */
 export interface CaptureScopeOptions extends ScopeOverrides {
   mechanism?: string;
+  /**
+   * Overrides the server's default fingerprint-based grouping for this one
+   * event (issue #17). At most 16 entries of at most 256 characters each
+   * (server-enforced; capped client-side too, mirroring the Elixir/Ruby
+   * SDKs' own `fingerprint` option).
+   */
+  fingerprint?: string[];
 }
 
 export interface CaptureExceptionOptions extends CaptureScopeOptions {
   /** Arbitrary structured data local to this one capture, merged into the event's `contexts.extra`. */
   context?: Record<string, unknown>;
+  /**
+   * Overrides the normal `parseStack(error.stack)` capture with an
+   * already-built wire frame array (mirrors the Elixir SDK's
+   * `Envelope.build_frame(%{} = wire_frame, _)` passthrough). Real capture
+   * callers never pass this; it exists so the golden-envelope contract
+   * test (issue #18) can call the real `captureException` with the
+   * golden's literal, cross-language-reproducible frames instead of a
+   * real `Error.stack` tied to this file's own call site.
+   */
+  frames?: WireStackFrame[];
 }
 
 export type CaptureMessageOptions = CaptureScopeOptions;
@@ -324,6 +345,7 @@ function resolveScopeFields(
 
 function buildExceptionItem(id: string, error: unknown, options: CaptureExceptionOptions | undefined, s: ObserveState): WireErrorItem {
   const normalized = normalizeError(error);
+  const frames = options?.frames ?? normalized.frames;
   const scoped = resolveScopeFields(options, mergeContext(options?.context, normalized.nonErrorValue), s);
   return {
     id,
@@ -335,14 +357,19 @@ function buildExceptionItem(id: string, error: unknown, options: CaptureExceptio
     exception: {
       type: normalized.type,
       value: capText(normalized.value, MAX_EXCEPTION_VALUE_CHARS),
-      ...(normalized.frames.length > 0 ? { stacktrace: { frames: capFrames(normalized.frames, MAX_STACK_TRACE_CHARS) } } : {}),
+      ...(frames.length > 0 ? { stacktrace: { frames: capFrames(frames, MAX_STACK_TRACE_CHARS) } } : {}),
     },
     ...(scoped.contexts !== undefined ? { contexts: scoped.contexts } : {}),
     ...(scoped.tags !== undefined ? { tags: scoped.tags } : {}),
     ...(scoped.user !== undefined ? { user: scoped.user } : {}),
     ...(scoped.breadcrumbs !== undefined ? { breadcrumbs: scoped.breadcrumbs } : {}),
+    ...(resolveFingerprint(options) !== undefined ? { fingerprint: resolveFingerprint(options) } : {}),
     mechanism: options?.mechanism ?? "generic",
   };
+}
+
+function resolveFingerprint(options: CaptureScopeOptions | undefined): string[] | undefined {
+  return capFingerprint(options?.fingerprint, MAX_FINGERPRINT_ENTRIES, MAX_FINGERPRINT_CHARS);
 }
 
 function mergeContext(userContext: Record<string, unknown> | undefined, nonErrorValue: unknown): Record<string, unknown> | undefined {
@@ -412,6 +439,7 @@ export function captureMessage(message: string, level: ErrorLevel = "info", opti
       ...(scoped.tags !== undefined ? { tags: scoped.tags } : {}),
       ...(scoped.user !== undefined ? { user: scoped.user } : {}),
       ...(scoped.breadcrumbs !== undefined ? { breadcrumbs: scoped.breadcrumbs } : {}),
+      ...(resolveFingerprint(options) !== undefined ? { fingerprint: resolveFingerprint(options) } : {}),
       mechanism: options?.mechanism ?? "generic",
     });
   } catch (err) {

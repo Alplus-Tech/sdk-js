@@ -36,6 +36,15 @@ export const DEFAULT_MAX_BREADCRUMBS = 30;
 export const SERVER_MAX_BREADCRUMBS = 100;
 export const MAX_BREADCRUMB_MESSAGE_CHARS = 2_048;
 export const MAX_BREADCRUMB_CATEGORY_CHARS = 128;
+/**
+ * Mirrors the server's `errorItemSchema.fingerprint`
+ * (`z.array(z.string().max(256)).min(1).max(16)`, issue #17) and the
+ * Elixir/Ruby SDKs' own copies of the same caps -- kept here so this SDK
+ * can accept a `fingerprint` override too (previously missing here; issue
+ * #18 contract testing surfaced the gap against the other two SDKs).
+ */
+export const MAX_FINGERPRINT_ENTRIES = 16;
+export const MAX_FINGERPRINT_CHARS = 256;
 
 /**
  * SDK-side batching thresholds (not a server cap): the in-memory queue is
@@ -134,4 +143,20 @@ export function capFrames(frames: readonly WireStackFrame[], maxChars: number): 
   const kept = [...frames];
   while (kept.length > 0 && JSON.stringify(kept).length > maxChars) kept.pop();
   return kept;
+}
+
+/**
+ * Caps a custom fingerprint override to the server's own bounds: at most
+ * `maxEntries` entries, each at most `maxChars` characters -- mirrors
+ * `sdks/ruby/lib/alplus/envelope.rb`'s `cap_fingerprint`. Returns
+ * `undefined` for an empty/undefined input so the caller can omit the wire
+ * key.
+ */
+export function capFingerprint(
+  fingerprint: readonly string[] | undefined,
+  maxEntries: number,
+  maxChars: number,
+): string[] | undefined {
+  if (fingerprint === undefined || fingerprint.length === 0) return undefined;
+  return fingerprint.slice(0, maxEntries).map((part) => capText(part, maxChars)!);
 }
