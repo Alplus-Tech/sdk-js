@@ -456,7 +456,7 @@ surface. `sendMeasureHit()` is no longer exported from `/node`/`/cloudflare`
 as of 0.3.0 (see [Measure](#measure-sendmeasurehit) above) — a breaking
 change made while the package was still unpublished, so it cost nothing.
 Patch versions are always backwards compatible. See
-[GitHub releases](https://github.com/alplus/sdk/releases) for the
+[GitHub releases](https://github.com/Alplus-Tech/sdk-js/releases) for the
 changelog.
 
 ## License

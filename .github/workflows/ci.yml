@@ -1,0 +1,52 @@
+# CI for the JavaScript SDK (@alplus/sdk), destined for Alplus-Tech/sdk-js.
+# Lives inside packages/sdk so it becomes the repo-root workflow after the split
+# (issue #26). GitHub ignores it here in the monorepo: it only reads workflows
+# under the repository-root .github/workflows.
+#
+# The contract test consumes the product's versioned golden fixtures as an
+# explicit input: this job checks out sdks/contract from Alplus-Tech/alplus at a
+# pinned tag and sets ALPLUS_CONTRACT_DIR. It never falls back to a local copy.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Pinned contract version. Bump only through a product sdk-compat change.
+  CONTRACT_REF: contract-v1.0.0
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Fetch the pinned, server-owned contract fixtures (explicit input).
+      - name: Check out the pinned contract
+        uses: actions/checkout@v4
+        with:
+          repository: Alplus-Tech/alplus
+          ref: ${{ env.CONTRACT_REF }}
+          # Read-only, fine-grained token scoped to the product contract. Set as
+          # a repository secret in Alplus-Tech/sdk-js.
+          token: ${{ secrets.CONTRACT_REPO_TOKEN }}
+          sparse-checkout: sdks/contract
+          path: .contract-src
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+      - name: Unit and contract tests
+        env:
+          ALPLUS_CONTRACT_DIR: ${{ github.workspace }}/.contract-src/sdks/contract
+        run: npm test

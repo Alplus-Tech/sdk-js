@@ -20,13 +20,42 @@
  * (see the contract README's "known gap"). Session is covered by the
  * monolith's server anchor and the Elixir/Ruby SDKs.
  */
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { __resetForTests, captureException, captureMessage, flush, init } from "./client";
 
-const CONTRACT_DIR = fileURLToPath(new URL("../../../../../sdks/contract", import.meta.url));
+// The golden contract is owned by the AL+ product (Alplus-Tech/alplus) and
+// consumed as an explicit, immutable input (issue #26): ALPLUS_CONTRACT_DIR
+// points at a checkout of `sdks/contract` at the pinned contract tag. There is
+// no monorepo-relative fallback -- an absent variable throws loudly.
+const CONTRACT_VERSION = "1.0.0";
 const NON_DETERMINISTIC_KEYS = ["id", "timestamp", "started_at", "duration_ms"];
+
+function contractDir(): string {
+  const dir = process.env.ALPLUS_CONTRACT_DIR;
+  if (!dir) {
+    throw new Error(
+      "ALPLUS_CONTRACT_DIR is not set. The golden contract is a versioned input owned by " +
+        `Alplus-Tech/alplus. Point ALPLUS_CONTRACT_DIR at a checkout of sdks/contract at the ` +
+        `contract-v${CONTRACT_VERSION} tag, then rerun.`,
+    );
+  }
+  const manifest = JSON.parse(readFileSync(`${dir}/manifest.json`, "utf8")) as {
+    version: string;
+    items: Record<string, string>;
+  };
+  if (manifest.version !== CONTRACT_VERSION) {
+    throw new Error(`contract version mismatch: pinned ${CONTRACT_VERSION}, got ${manifest.version}`);
+  }
+  for (const [name, expected] of Object.entries(manifest.items)) {
+    const actual = `sha256:${createHash("sha256").update(readFileSync(`${dir}/${name}`)).digest("hex")}`;
+    if (actual !== expected) {
+      throw new Error(`contract checksum mismatch for ${name}: expected ${expected}, got ${actual}`);
+    }
+  }
+  return dir;
+}
 
 class ContractTestError extends Error {
   constructor(message: string) {
@@ -36,7 +65,7 @@ class ContractTestError extends Error {
 }
 
 function golden(name: string): Record<string, unknown> {
-  return JSON.parse(readFileSync(`${CONTRACT_DIR}/${name}`, "utf8")) as Record<string, unknown>;
+  return JSON.parse(readFileSync(`${contractDir()}/${name}`, "utf8")) as Record<string, unknown>;
 }
 
 function normalize(item: Record<string, unknown>): Record<string, unknown> {
