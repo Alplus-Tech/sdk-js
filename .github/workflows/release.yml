@@ -1,0 +1,49 @@
+# Release for @alplus/sdk to npm, destined for Alplus-Tech/sdk-js.
+# Manual or tag-driven only; a product change can never publish an SDK.
+#
+# Publishing uses npm trusted publishing (OIDC) -- the registry's preferred
+# mechanism, no long-lived NPM_TOKEN. Configure @alplus/sdk's trusted publisher
+# in the npm package settings to accept Alplus-Tech/sdk-js + this workflow.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write # npm trusted publishing (provenance)
+
+env:
+  CONTRACT_REF: contract-v1.0.0
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check out the pinned contract
+        uses: actions/checkout@v4
+        with:
+          repository: Alplus-Tech/alplus
+          ref: ${{ env.CONTRACT_REF }}
+          token: ${{ secrets.CONTRACT_REPO_TOKEN }}
+          sparse-checkout: sdks/contract
+          path: .contract-src
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+
+      - run: npm ci
+      - run: npm run typecheck
+      - name: Verify before publish
+        env:
+          ALPLUS_CONTRACT_DIR: ${{ github.workspace }}/.contract-src/sdks/contract
+        run: npm test
+      - run: npm run build
+      # --provenance requires id-token: write and npm >= 9.5.
+      - run: npm publish --provenance --access public

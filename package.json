@@ -21,10 +21,10 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/alplus/sdk"
+    "url": "https://github.com/Alplus-Tech/sdk-js"
   },
   "homepage": "https://alplus.dev",
-  "bugs": "https://github.com/alplus/sdk/issues",
+  "bugs": "https://github.com/Alplus-Tech/sdk-js/issues",
   "files": [
     "dist",
     "README.md"
