@@ -243,7 +243,33 @@ async function sendBatch(s: ObserveState, items: WireErrorItem[]): Promise<void>
   }
 }
 
-/** Drains whatever is currently queued and sends it. Single-flight per client: a call while one is already in flight joins it rather than starting a second concurrent send. */
+/**
+ * Sends `items`, then -- while still the one and only in-flight send --
+ * checks the queue again: if a capture landed while this send was in
+ * flight, it sends THAT batch too before letting `s.inFlight` go `null`.
+ * This is what makes `flush()`/`close()` truthful: whichever caller is
+ * awaiting `s.inFlight` (the original `triggerFlush` caller, or a later one
+ * that joined the same in-flight promise) only sees it resolve once the
+ * queue is actually empty, not just once the first POST lands.
+ */
+async function drainLoop(s: ObserveState, initialItems: WireErrorItem[]): Promise<void> {
+  let items = initialItems;
+  for (;;) {
+    try {
+      await sendBatch(s, items);
+    } catch (err) {
+      // Belt-and-suspenders: sendBatch/postJsonWithRetries should never
+      // reject, but this guarantees flush()/close() never throw either way.
+      if (s.debug) debugWarn("observe: internal error while flushing", err);
+    }
+    if (s.queue.length === 0) break;
+    items = s.queue.splice(0, s.queue.length);
+    s.queuedBytes = 0;
+  }
+  s.inFlight = null;
+}
+
+/** Drains whatever is currently queued and sends it, then keeps draining (single POST at a time) until the queue is empty. Single-flight per client: a call while one is already in flight joins it rather than starting a second concurrent send. */
 function triggerFlush(s: ObserveState): Promise<void> {
   if (s.inFlight !== null) return s.inFlight;
 
@@ -251,15 +277,7 @@ function triggerFlush(s: ObserveState): Promise<void> {
   s.queuedBytes = 0;
   if (items.length === 0) return Promise.resolve();
 
-  const promise = sendBatch(s, items)
-    .catch((err: unknown) => {
-      // Belt-and-suspenders: sendBatch/postJsonWithRetries should never
-      // reject, but this guarantees flush()/close() never throw either way.
-      if (s.debug) debugWarn("observe: internal error while flushing", err);
-    })
-    .finally(() => {
-      s.inFlight = null;
-    });
+  const promise = drainLoop(s, items);
   s.inFlight = promise;
   return promise;
 }

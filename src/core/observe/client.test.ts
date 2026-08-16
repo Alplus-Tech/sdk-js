@@ -361,4 +361,59 @@ describe("Observe client", () => {
     const items = lastBody(fetchImpl).items as unknown[];
     expect(items.length).toBe(2);
   });
+
+  it("drains a queue that grows during an in-flight send: flush() waits for the whole chain, not just the first POST (issue #43)", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(okResponse());
+    init({ key: "alp_p_test", fetchImpl });
+
+    for (let i = 0; i < 10; i++) captureException(new Error(`boom ${i}`));
+    // The 10th capture crosses BATCH_MAX_ITEMS and starts the first send
+    // synchronously (execution runs up to sendBatch's first `await` inside
+    // the same call stack as the 10th captureException), so exactly one
+    // POST is already in flight here -- no timer/microtask advance needed.
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+
+    // The 11th capture lands while that first send is still in flight.
+    captureException(new Error("boom 10"));
+
+    const drained = await flush(5_000);
+
+    expect(drained).toBe(true);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    const totalItems = fetchImpl.mock.calls.reduce((sum, call) => {
+      const body = JSON.parse((call[1] as RequestInit).body as string) as { items: unknown[] };
+      return sum + body.items.length;
+    }, 0);
+    expect(totalItems).toBe(11);
+  });
+
+  it("stays single-flight: two concurrent flush() calls never POST two batches at once", async () => {
+    let inFlightCount = 0;
+    let maxConcurrent = 0;
+    const fetchImpl = vi.fn().mockImplementation(async () => {
+      inFlightCount++;
+      maxConcurrent = Math.max(maxConcurrent, inFlightCount);
+      await Promise.resolve();
+      inFlightCount--;
+      return okResponse();
+    });
+    init({ key: "alp_p_test", fetchImpl });
+    captureException(new Error("boom"));
+
+    const [a, b] = await Promise.all([flush(), flush()]);
+    expect(a).toBe(true);
+    expect(b).toBe(true);
+    expect(maxConcurrent).toBe(1);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("flush() honors its timeout even if the send never settles, so close() can't hang the host", async () => {
+    const fetchImpl = vi.fn().mockImplementation(() => new Promise<Response>(() => {})); // never resolves
+    init({ key: "alp_p_test", fetchImpl });
+    captureException(new Error("boom"));
+
+    const promise = flush(1_000);
+    await vi.advanceTimersByTimeAsync(1_000);
+    await expect(promise).resolves.toBe(false);
+  });
 });

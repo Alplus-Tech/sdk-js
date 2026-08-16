@@ -102,6 +102,35 @@ describe("node Observe: automatic global error capture (section 2)", () => {
     expect(proc.listenerCount("uncaughtException")).toBe(0);
   });
 
+  it("a capture that lands while the uncaughtException flush is still in flight is drained too, and the process still exits (issue #43)", async () => {
+    const proc = fakeProcess() as ReturnType<typeof fakeProcess> & { fire(event: string, ...args: unknown[]): void };
+    const fetchImpl = vi.fn().mockResolvedValue(okResponse());
+    init({ key: "alp_p_test", fetchImpl, processImpl: proc });
+
+    const boom = new Error("uncaught");
+    proc.fire("uncaughtException", boom);
+    // The handler's captureException + flush() call runs synchronously up
+    // to sendBatch's first `await`, so exactly one POST is already in
+    // flight here -- before any timer/microtask has been advanced.
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+
+    // A second capture lands mid-flight -- e.g. a log statement or another
+    // handler running before this process actually exits. It must still be
+    // delivered, and the process must still exit cleanly rather than hang.
+    captureException(new Error("landed mid-flight"));
+
+    await vi.runAllTimersAsync();
+    await Promise.resolve();
+
+    expect(proc.exitCalls).toEqual([1]);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    const totalItems = fetchImpl.mock.calls.reduce((sum, call) => {
+      const body = JSON.parse((call[1] as RequestInit).body as string) as { items: unknown[] };
+      return sum + body.items.length;
+    }, 0);
+    expect(totalItems).toBe(2);
+  });
+
   it("a manual captureException for the SAME error object the uncaughtException handler also sees is deduplicated to one event", async () => {
     const proc = fakeProcess() as ReturnType<typeof fakeProcess> & { fire(event: string, ...args: unknown[]): void };
     const fetchImpl = vi.fn().mockResolvedValue(okResponse());
