@@ -34,8 +34,10 @@ import {
   capText,
   type ErrorLevel,
   type WireErrorItem,
+  type WireException,
   type WireStackFrame,
 } from "./envelope";
+import { stripQueryString } from "./breadcrumbs";
 import { mergeScope, type ScopeOverrides, type ScopeSnapshot } from "./scope";
 import { parseStack } from "./stack";
 import { delay, postJsonWithRetries } from "./transport";
@@ -356,15 +358,54 @@ function resolveScopeFields(
   const merged = mergeScope(ambient, options);
   const namedContexts: Record<string, unknown> = { ...merged.contexts };
   if (extraContext !== undefined) namedContexts.extra = extraContext;
+  if (namedContexts.request === undefined) {
+    const request = defaultRequestContext();
+    if (request !== undefined) namedContexts.request = request;
+  }
   const contexts = Object.keys(namedContexts).length > 0 ? capContext(namedContexts, MAX_CONTEXT_CHARS) : undefined;
   const breadcrumbs = merged.breadcrumbs.length > 0 ? merged.breadcrumbs.slice(-SERVER_MAX_BREADCRUMBS) : undefined;
   return { contexts, tags: capTags(merged.tags, s), user: merged.user, breadcrumbs };
 }
 
+/**
+ * Ambient request context for browser-like hosts: the page URL with its
+ * query string stripped (a query string routinely carries tokens and PII
+ * that key-based scrubbing cannot see inside a raw string) plus the user
+ * agent. Non-browser hosts (Node, Cloudflare) return `undefined`; the host
+ * attaches its own request context through the scope instead.
+ */
+function defaultRequestContext(): Record<string, string> | undefined {
+  // Gated on a real page URL, not on `navigator`: Node ≥21 defines a global
+  // `navigator.userAgent` too, and a server-side host must not grow a
+  // meaningless request context (it broke the golden contract test).
+  if (typeof window === "undefined" || typeof window.location?.href !== "string") return undefined;
+  const context: Record<string, string> = { url: stripQueryString(window.location.href) };
+  if (typeof navigator !== "undefined" && typeof navigator.userAgent === "string") {
+    context.user_agent = navigator.userAgent;
+  }
+  return context;
+}
+
+/** Walks `Error#cause` into the wire `cause` chain, bounded at the server's limit of 4 nested causes; a cycle terminates at the bound. */
+function buildCause(error: unknown, depth: number): WireException | undefined {
+  if (depth <= 0 || !(error instanceof Error)) return undefined;
+  const normalized = normalizeError(error);
+  const nested = buildCause(error.cause, depth - 1);
+  return {
+    type: normalized.type,
+    value: capText(normalized.value, MAX_EXCEPTION_VALUE_CHARS),
+    ...(normalized.frames.length > 0 ? { stacktrace: { frames: capFrames(normalized.frames, MAX_STACK_TRACE_CHARS) } } : {}),
+    ...(nested !== undefined ? { cause: nested } : {}),
+  };
+}
+
+const MAX_CAUSE_DEPTH = 4;
+
 function buildExceptionItem(id: string, error: unknown, options: CaptureExceptionOptions | undefined, s: ObserveState): WireErrorItem {
   const normalized = normalizeError(error);
   const frames = options?.frames ?? normalized.frames;
   const scoped = resolveScopeFields(options, mergeContext(options?.context, normalized.nonErrorValue), s);
+  const cause = error instanceof Error ? buildCause(error.cause, MAX_CAUSE_DEPTH) : undefined;
   return {
     id,
     type: "exception",
@@ -376,6 +417,7 @@ function buildExceptionItem(id: string, error: unknown, options: CaptureExceptio
       type: normalized.type,
       value: capText(normalized.value, MAX_EXCEPTION_VALUE_CHARS),
       ...(frames.length > 0 ? { stacktrace: { frames: capFrames(frames, MAX_STACK_TRACE_CHARS) } } : {}),
+      ...(cause !== undefined ? { cause } : {}),
     },
     ...(scoped.contexts !== undefined ? { contexts: scoped.contexts } : {}),
     ...(scoped.tags !== undefined ? { tags: scoped.tags } : {}),

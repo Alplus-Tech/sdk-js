@@ -91,6 +91,18 @@ export interface WireUser {
   email?: string;
 }
 
+/**
+ * One exception in the wire item. `cause` nests the next link of the
+ * `Error#cause` chain; the server accepts at most 4 nested causes
+ * (`Alplus.Observe.ErrorEnvelope`'s depth 5 counting the top level).
+ */
+export interface WireException {
+  type: string;
+  value?: string;
+  stacktrace?: { frames: WireStackFrame[] };
+  cause?: WireException;
+}
+
 export interface WireErrorItem {
   id: string;
   type: "exception" | "message";
@@ -99,11 +111,7 @@ export interface WireErrorItem {
   release?: string;
   environment?: string;
   message?: string;
-  exception?: {
-    type: string;
-    value?: string;
-    stacktrace?: { frames: WireStackFrame[] };
-  };
+  exception?: WireException;
   contexts?: Record<string, unknown>;
   mechanism?: string;
   breadcrumbs?: WireBreadcrumb[];

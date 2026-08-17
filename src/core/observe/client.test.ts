@@ -144,6 +144,71 @@ describe("Observe client", () => {
     expect((item.contexts as { extra: { non_error_value: unknown } }).extra.non_error_value).toBe("just a string");
   });
 
+  it("walks Error#cause into the wire exception.cause chain, bounded at 4 causes", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(okResponse());
+    init({ key: "alp_p_test", fetchImpl });
+    const root = new TypeError("root cause");
+    const middle = new Error("middle", { cause: root });
+    const outer = new Error("outer", { cause: middle });
+    captureException(outer);
+    await flush();
+    const item = (lastBody(fetchImpl).items as Array<Record<string, unknown>>)[0]!;
+    const exception = item.exception as { value?: string; cause?: { type: string; value?: string; cause?: { type: string; cause?: unknown } } };
+    expect(exception.value).toBe("outer");
+    expect(exception.cause?.value).toBe("middle");
+    expect(exception.cause?.cause?.type).toBe("TypeError");
+    expect(exception.cause?.cause?.cause).toBeUndefined();
+
+    fetchImpl.mockClear();
+    let deep: Error = new Error("layer 0");
+    for (let n = 1; n < 8; n += 1) deep = new Error(`layer ${n}`, { cause: deep });
+    captureException(deep);
+    await flush();
+    const deepItem = (lastBody(fetchImpl).items as Array<Record<string, unknown>>)[0]!;
+    let depth = 0;
+    let cursor = (deepItem.exception as { cause?: unknown }).cause as { cause?: unknown } | undefined;
+    while (cursor !== undefined) {
+      depth += 1;
+      cursor = cursor.cause as { cause?: unknown } | undefined;
+    }
+    expect(depth).toBe(4);
+  });
+
+  it("attaches contexts.request (query-stripped url + user agent) in a browser-like host", async () => {
+    vi.stubGlobal("window", { location: { href: "https://shop.test/cart?token=shh" } });
+    vi.stubGlobal("navigator", { userAgent: "TestBrowser/1.0" });
+    try {
+      const fetchImpl = vi.fn().mockResolvedValue(okResponse());
+      init({ key: "alp_p_test", fetchImpl });
+      captureException(new Error("boom"));
+      await flush();
+      const item = (lastBody(fetchImpl).items as Array<Record<string, unknown>>)[0]!;
+      const request = (item.contexts as { request: { url: string; user_agent: string } }).request;
+      expect(request.url).toBe("https://shop.test/cart");
+      expect(request.user_agent).toBe("TestBrowser/1.0");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("attaches no contexts.request outside a browser-like host", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(okResponse());
+    init({ key: "alp_p_test", fetchImpl });
+    captureException(new Error("boom"));
+    await flush();
+    const item = (lastBody(fetchImpl).items as Array<Record<string, unknown>>)[0]!;
+    expect(item.contexts).toBeUndefined();
+  });
+
+  it("a non-Error cause is dropped rather than serialized", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(okResponse());
+    init({ key: "alp_p_test", fetchImpl });
+    captureException(new Error("outer", { cause: "just a string" }));
+    await flush();
+    const item = (lastBody(fetchImpl).items as Array<Record<string, unknown>>)[0]!;
+    expect((item.exception as { cause?: unknown }).cause).toBeUndefined();
+  });
+
   it("merges options.context into contexts.extra", async () => {
     const fetchImpl = vi.fn().mockResolvedValue(okResponse());
     init({ key: "alp_p_test", fetchImpl });
