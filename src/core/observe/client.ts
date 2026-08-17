@@ -33,6 +33,7 @@ import {
   capFrames,
   capText,
   type ErrorLevel,
+  type WireBreadcrumb,
   type WireErrorItem,
   type WireException,
   type WireStackFrame,
@@ -94,6 +95,18 @@ export interface ObserveInitOptions {
    */
   captureUnhandled?: boolean;
   /**
+   * Post-error log window in ms (issue #47): an exception item lingers this
+   * long before it joins the send queue, and console/log breadcrumbs
+   * recorded during the window are appended to it, marked
+   * `data.after_error`. `0` disables the window (items queue immediately,
+   * exactly the pre-#47 behavior). Clamped to `BATCH_FLUSH_MS` so a
+   * pending item can never outwait the idle flush it will join.
+   * `flush()`/`close()`/the pagehide keepalive seal pending items
+   * immediately -- the window delays sending, never loses events.
+   * Default `2000`.
+   */
+  postErrorLogWindowMs?: number;
+  /**
    * Breadcrumb ring buffer capacity (docs/sdk/02-dx-improvements.md section
    * 3). Default 30. Only meaningful on adapters that carry an ambient
    * breadcrumb trail (browser, Node); Cloudflare has none to size.
@@ -140,6 +153,12 @@ export interface CaptureExceptionOptions extends CaptureScopeOptions {
 
 export type CaptureMessageOptions = CaptureScopeOptions;
 
+interface PendingItem {
+  item: WireErrorItem;
+  appended: number;
+  timer: ReturnType<typeof setTimeout>;
+}
+
 interface ObserveState {
   key: string;
   environment: string;
@@ -148,8 +167,10 @@ interface ObserveState {
   fetchImpl: typeof fetch;
   debug: boolean;
   autoFlushIntervalMs: number;
+  postErrorLogWindowMs: number;
   queue: WireErrorItem[];
   queuedBytes: number;
+  pending: PendingItem[];
   inFlight: Promise<void> | null;
   timer: ReturnType<typeof setTimeout> | null;
   closed: boolean;
@@ -205,6 +226,63 @@ function scheduleTimer(s: ObserveState): void {
 
 function estimateBytes(item: WireErrorItem): number {
   return new TextEncoder().encode(JSON.stringify(item)).byteLength;
+}
+
+const DEFAULT_POST_ERROR_LOG_WINDOW_MS = 2_000;
+/**
+ * At most this many after-error breadcrumbs join a pending item. A crash
+ * that triggers a log storm gets a bounded tail, and the before-error
+ * trail is never evicted to make room.
+ */
+const MAX_AFTER_ERROR_BREADCRUMBS = 20;
+
+/**
+ * Holds an exception item open for the post-error log window (issue #47),
+ * or queues it immediately when the window is disabled.
+ */
+function enqueueOrHold(s: ObserveState, item: WireErrorItem): void {
+  if (s.postErrorLogWindowMs === 0) {
+    enqueue(s, item);
+    return;
+  }
+
+  const pendingItem: PendingItem = {
+    item,
+    appended: 0,
+    timer: setTimeout(() => sealPending(s, pendingItem), s.postErrorLogWindowMs),
+  };
+  maybeUnref(pendingItem.timer);
+  s.pending.push(pendingItem);
+}
+
+function sealPending(s: ObserveState, pendingItem: PendingItem): void {
+  const index = s.pending.indexOf(pendingItem);
+  if (index === -1) return;
+  s.pending.splice(index, 1);
+  clearTimeout(pendingItem.timer);
+  enqueue(s, pendingItem.item);
+}
+
+function sealAllPending(s: ObserveState): void {
+  while (s.pending.length > 0) sealPending(s, s.pending[0]!);
+}
+
+/**
+ * Called by adapters when a log-line breadcrumb (browser `console.*`) is
+ * recorded: appends it to every pending exception item, marked
+ * `data.after_error`, within the per-item and server breadcrumb bounds.
+ * A no-op with no pending items or before `init`.
+ */
+export function notifyLogBreadcrumb(crumb: WireBreadcrumb): void {
+  if (state === null || state.pending.length === 0) return;
+  for (const pendingItem of state.pending) {
+    if (pendingItem.appended >= MAX_AFTER_ERROR_BREADCRUMBS) continue;
+    const breadcrumbs = pendingItem.item.breadcrumbs ?? [];
+    if (breadcrumbs.length >= SERVER_MAX_BREADCRUMBS) continue;
+    breadcrumbs.push({ ...crumb, data: { ...(crumb.data ?? {}), after_error: true } });
+    pendingItem.item.breadcrumbs = breadcrumbs;
+    pendingItem.appended += 1;
+  }
 }
 
 function enqueue(s: ObserveState, item: WireErrorItem): void {
@@ -295,6 +373,8 @@ export function init(options: ObserveInitOptions): void {
   }
   if (state !== null) clearTimer(state);
 
+  if (state !== null) sealAllPending(state);
+
   const autoFlushIntervalMs = options.autoFlushIntervalMs ?? BATCH_FLUSH_MS;
   const next: ObserveState = {
     key: options.key,
@@ -304,8 +384,10 @@ export function init(options: ObserveInitOptions): void {
     fetchImpl: options.fetchImpl ?? globalThis.fetch,
     debug: options.debug ?? false,
     autoFlushIntervalMs,
+    postErrorLogWindowMs: Math.max(0, Math.min(options.postErrorLogWindowMs ?? DEFAULT_POST_ERROR_LOG_WINDOW_MS, BATCH_FLUSH_MS)),
     queue: [],
     queuedBytes: 0,
+    pending: [],
     inFlight: null,
     timer: null,
     closed: false,
@@ -466,7 +548,7 @@ export function captureException(error: unknown, options?: CaptureExceptionOptio
       if (state.debug) debugWarn("captureException() called after close(); event dropped.", id);
       return id;
     }
-    enqueue(state, buildExceptionItem(id, error, options, state));
+    enqueueOrHold(state, buildExceptionItem(id, error, options, state));
   } catch (err) {
     if (state?.debug === true) debugWarn("captureException() failed internally; event dropped.", err);
   }
@@ -516,6 +598,7 @@ export function captureMessage(message: string, level: ErrorLevel = "info", opti
  */
 export async function flush(timeoutMs: number = DEFAULT_FLUSH_TIMEOUT_MS): Promise<boolean> {
   if (state === null) return true;
+  sealAllPending(state);
   clearTimer(state);
   const pending = triggerFlush(state);
   const timedOut = Symbol("observe-flush-timeout");
@@ -550,6 +633,7 @@ export async function close(timeoutMs: number = DEFAULT_FLUSH_TIMEOUT_MS): Promi
  */
 export function buildKeepaliveFlushRequest(): { url: string; body: string; headers: Record<string, string> } | null {
   if (state === null) return null;
+  sealAllPending(state);
   clearTimer(state);
   const items = state.queue.splice(0, state.queue.length);
   state.queuedBytes = 0;
@@ -568,7 +652,11 @@ export function buildKeepaliveFlushRequest(): { url: string; body: string; heade
  * test file to isolate cases that assert on pre-`init` behavior.
  */
 export function __resetForTests(): void {
-  if (state !== null) clearTimer(state);
+  if (state !== null) {
+    clearTimer(state);
+    for (const pendingItem of state.pending) clearTimeout(pendingItem.timer);
+    state.pending = [];
+  }
   state = null;
   __resetDedupForTests();
 }

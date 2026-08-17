@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { __resetForTests, captureException, captureMessage, close, flush, init, setScopeProvider } from "./client";
+import { __resetForTests, buildKeepaliveFlushRequest, captureException, captureMessage, close, flush, init, notifyLogBreadcrumb, setScopeProvider } from "./client";
 import { MAX_MESSAGE_CHARS } from "./envelope";
 
 function okResponse(): Response {
@@ -209,6 +209,80 @@ describe("Observe client", () => {
     expect((item.exception as { cause?: unknown }).cause).toBeUndefined();
   });
 
+  it("post-error log window: a log line after capture reaches the event, marked after_error", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(okResponse());
+    init({ key: "alp_p_test", fetchImpl });
+    captureException(new Error("boom"));
+
+    notifyLogBreadcrumb({ category: "console", message: "retrying payment gateway", level: "warning", ts: new Date().toISOString() });
+
+    // The item is pending, not queued: the 2 s window has not elapsed.
+    await vi.advanceTimersByTimeAsync(1_999);
+    expect(fetchImpl).not.toHaveBeenCalled();
+
+    // Window elapses -> item seals into the queue -> idle timer sends it.
+    await vi.advanceTimersByTimeAsync(1 + 5_000);
+    const item = (lastBody(fetchImpl).items as Array<Record<string, unknown>>)[0]!;
+    const crumbs = item.breadcrumbs as Array<{ message?: string; data?: { after_error?: boolean } }>;
+    const afterCrumb = crumbs.find((c) => c.message === "retrying payment gateway");
+    expect(afterCrumb?.data?.after_error).toBe(true);
+  });
+
+  it("post-error log window: flush() seals immediately and a late log line is not attached", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(okResponse());
+    init({ key: "alp_p_test", fetchImpl });
+    captureException(new Error("boom"));
+    await flush();
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    notifyLogBreadcrumb({ category: "console", message: "too late", level: "info", ts: new Date().toISOString() });
+    await flush();
+    const item = (lastBody(fetchImpl).items as Array<Record<string, unknown>>)[0]!;
+    const crumbs = (item.breadcrumbs ?? []) as Array<{ message?: string }>;
+    expect(crumbs.some((c) => c.message === "too late")).toBe(false);
+  });
+
+  it("post-error log window: after-error appends are capped and never evict before-context", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(okResponse());
+    init({ key: "alp_p_test", fetchImpl });
+    captureException(new Error("boom"), { breadcrumbs: [{ category: "console", message: "before-line", level: "info", ts: new Date().toISOString() }] });
+
+    for (let i = 0; i < 30; i++) {
+      notifyLogBreadcrumb({ category: "console", message: `after ${i}`, level: "info", ts: new Date().toISOString() });
+    }
+    await flush();
+
+    const item = (lastBody(fetchImpl).items as Array<Record<string, unknown>>)[0]!;
+    const crumbs = item.breadcrumbs as Array<{ message?: string; data?: { after_error?: boolean } }>;
+    expect(crumbs[0]?.message).toBe("before-line");
+    expect(crumbs.filter((c) => c.data?.after_error === true).length).toBe(20);
+  });
+
+  it("post-error log window: postErrorLogWindowMs 0 queues immediately, exactly the old behavior", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(okResponse());
+    init({ key: "alp_p_test", fetchImpl, postErrorLogWindowMs: 0 });
+    captureException(new Error("boom"));
+
+    notifyLogBreadcrumb({ category: "console", message: "not attached", level: "info", ts: new Date().toISOString() });
+    await flush();
+    const item = (lastBody(fetchImpl).items as Array<Record<string, unknown>>)[0]!;
+    const crumbs = (item.breadcrumbs ?? []) as Array<{ message?: string }>;
+    expect(crumbs.some((c) => c.message === "not attached")).toBe(false);
+  });
+
+  it("post-error log window: the keepalive unload request seals pending items", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(okResponse());
+    init({ key: "alp_p_test", fetchImpl });
+    captureException(new Error("boom"));
+    notifyLogBreadcrumb({ category: "console", message: "during unload", level: "info", ts: new Date().toISOString() });
+
+    const request = buildKeepaliveFlushRequest();
+    expect(request).not.toBeNull();
+    const body = JSON.parse(request!.body) as { items: Array<Record<string, unknown>> };
+    const crumbs = body.items[0]!.breadcrumbs as Array<{ message?: string; data?: { after_error?: boolean } }>;
+    expect(crumbs.some((c) => c.message === "during unload" && c.data?.after_error === true)).toBe(true);
+  });
+
   it("merges options.context into contexts.extra", async () => {
     const fetchImpl = vi.fn().mockResolvedValue(okResponse());
     init({ key: "alp_p_test", fetchImpl });
@@ -329,7 +403,9 @@ describe("Observe client", () => {
 
   it("the default idle timer flushes a sub-threshold queue after 5 seconds", async () => {
     const fetchImpl = vi.fn().mockResolvedValue(okResponse());
-    init({ key: "alp_p_test", fetchImpl });
+    // Window off: this test asserts idle-timer mechanics, not the
+    // post-error log window (which has its own tests below).
+    init({ key: "alp_p_test", fetchImpl, postErrorLogWindowMs: 0 });
     captureException(new Error("boom"));
     expect(fetchImpl).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(5_000);
@@ -429,7 +505,7 @@ describe("Observe client", () => {
 
   it("drains a queue that grows during an in-flight send: flush() waits for the whole chain, not just the first POST (issue #43)", async () => {
     const fetchImpl = vi.fn().mockResolvedValue(okResponse());
-    init({ key: "alp_p_test", fetchImpl });
+    init({ key: "alp_p_test", fetchImpl, postErrorLogWindowMs: 0 });
 
     for (let i = 0; i < 10; i++) captureException(new Error(`boom ${i}`));
     // The 10th capture crosses BATCH_MAX_ITEMS and starts the first send

@@ -219,6 +219,62 @@ describe("browser instrumentation", () => {
       expect(crumb?.message).toBe("careful now");
     });
 
+    it("console.info and console.debug are recorded with their own levels (issue #47)", async () => {
+      const win = fakeWindow();
+      vi.stubGlobal("window", win);
+      vi.stubGlobal("document", fakeDocument());
+      const fetchImpl = vi.fn().mockResolvedValue(okResponse());
+      vi.stubGlobal("fetch", fetchImpl);
+
+      init({ key: "alp_p_test", fetchImpl });
+      console.info("cache warmed");
+      console.debug("payload bytes: 512");
+      captureException(new Error("boom"));
+      await flush();
+
+      const call = fetchImpl.mock.calls.find(([url]) => url === "https://ingest.alplus.dev/e/errors");
+      const body = JSON.parse((call![1] as RequestInit).body as string) as { items: Array<{ breadcrumbs?: Array<{ category?: string; message?: string; level?: string }> }> };
+      const crumbs = body.items[0]!.breadcrumbs?.filter((b) => b.category === "console") ?? [];
+      expect(crumbs.find((b) => b.message === "cache warmed")?.level).toBe("info");
+      expect(crumbs.find((b) => b.message === "payload bytes: 512")?.level).toBe("debug");
+    });
+
+    it("the SDK's own [@alplus/sdk] diagnostics are never recorded as breadcrumbs (issue #47)", async () => {
+      const win = fakeWindow();
+      vi.stubGlobal("window", win);
+      vi.stubGlobal("document", fakeDocument());
+      const fetchImpl = vi.fn().mockResolvedValue(okResponse());
+      vi.stubGlobal("fetch", fetchImpl);
+
+      init({ key: "alp_p_test", fetchImpl });
+      console.warn("[@alplus/sdk] internal diagnostic line");
+      captureException(new Error("boom"));
+      await flush();
+
+      const call = fetchImpl.mock.calls.find(([url]) => url === "https://ingest.alplus.dev/e/errors");
+      const body = JSON.parse((call![1] as RequestInit).body as string) as { items: Array<{ breadcrumbs?: Array<{ message?: string }> }> };
+      const crumbs = body.items[0]!.breadcrumbs ?? [];
+      expect(crumbs.some((b) => b.message?.includes("internal diagnostic"))).toBe(false);
+    });
+
+    it("a console line after the error joins the same event through the post-error window (issue #47)", async () => {
+      const win = fakeWindow();
+      vi.stubGlobal("window", win);
+      vi.stubGlobal("document", fakeDocument());
+      const fetchImpl = vi.fn().mockResolvedValue(okResponse());
+      vi.stubGlobal("fetch", fetchImpl);
+
+      init({ key: "alp_p_test", fetchImpl });
+      captureException(new Error("boom"));
+      console.error("request aborted after failure");
+      await flush();
+
+      const call = fetchImpl.mock.calls.find(([url]) => url === "https://ingest.alplus.dev/e/errors");
+      const body = JSON.parse((call![1] as RequestInit).body as string) as { items: Array<{ breadcrumbs?: Array<{ message?: string; data?: { after_error?: boolean } }> }> };
+      const crumb = body.items[0]!.breadcrumbs?.find((b) => b.message === "request aborted after failure");
+      expect(crumb?.data?.after_error).toBe(true);
+    });
+
     it("a fetch call is recorded with method/status, query string stripped, and the response is still returned to the caller", async () => {
       const win = fakeWindow();
       vi.stubGlobal("window", win);

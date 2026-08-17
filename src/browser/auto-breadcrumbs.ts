@@ -22,6 +22,8 @@
  */
 import { addBreadcrumb } from "./scope";
 import { stripQueryString } from "../core/observe";
+import { notifyLogBreadcrumb } from "../core/observe/client";
+import { capText, MAX_BREADCRUMB_MESSAGE_CHARS } from "../core/observe/envelope";
 
 type Cleanup = () => void;
 const cleanups: Cleanup[] = [];
@@ -93,14 +95,33 @@ function registerClicks(doc: Document): void {
   cleanups.push(() => doc.removeEventListener?.("click", onClick, { capture: true }));
 }
 
-const CONSOLE_METHOD_LEVEL = { log: "info", warn: "warning", error: "error" } as const;
+const CONSOLE_METHOD_LEVEL = { log: "info", info: "info", debug: "debug", warn: "warning", error: "error" } as const;
+
+/**
+ * The SDK's own diagnostics channel (`client.ts`'s `debugWarn`) prefixes
+ * every line with this tag; those lines are the SDK talking to itself, not
+ * the application's log narrative, so the console patch skips them
+ * (issue #47's timeline must contain application output only).
+ */
+const SDK_INTERNAL_PREFIX = "[@alplus/sdk]";
 
 function registerConsole(con: Console): void {
-  (["log", "warn", "error"] as const).forEach((method) => {
+  (["log", "info", "debug", "warn", "error"] as const).forEach((method) => {
     if (typeof con[method] !== "function") return;
     const original = con[method].bind(con);
     con[method] = ((...args: unknown[]) => {
-      safeAddBreadcrumb({ category: "console", message: args.map((a) => (typeof a === "string" ? a : safeStringify(a))).join(" "), level: CONSOLE_METHOD_LEVEL[method] });
+      const message = args.map((a) => (typeof a === "string" ? a : safeStringify(a))).join(" ");
+      if (!message.startsWith(SDK_INTERNAL_PREFIX)) {
+        safeAddBreadcrumb({ category: "console", message, level: CONSOLE_METHOD_LEVEL[method] });
+        // Also offered to any exception item inside its post-error log
+        // window (issue #47); a plain wire-shaped crumb, stamped here
+        // because the scope ring stamps its own copy internally.
+        try {
+          notifyLogBreadcrumb({ category: "console", message: capText(message, MAX_BREADCRUMB_MESSAGE_CHARS), level: CONSOLE_METHOD_LEVEL[method], ts: new Date().toISOString() });
+        } catch {
+          // A pending-append failure must never affect the console call.
+        }
+      }
       return original(...args);
     }) as Console["log"];
     cleanups.push(() => {
