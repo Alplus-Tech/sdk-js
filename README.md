@@ -18,9 +18,8 @@ npm install @alplus/sdk
 
 Zero runtime dependencies. Requires Node.js >= 18 for the `/node` entry
 point; the `/cloudflare` and neutral (`.`) entry points work anywhere
-`fetch` and `URL` are global (workerd, browsers, modern runtimes). A `/core`
-entry point is also available if you want the smallest possible bundle and
-don't need a platform-specific wrapper.
+`fetch` and `URL` are global (workerd, browsers, modern runtimes). Do not
+import `./core`. That entry is adapter-internal.
 
 ## Monitor: `heartbeat()`
 
@@ -101,7 +100,7 @@ option:
 ### `heartbeat()` options reference
 
 ```ts
-import { heartbeat } from "@alplus/sdk/node"; // or /cloudflare, /core, or "@alplus/sdk"
+import { heartbeat } from "@alplus/sdk/node"; // or /cloudflare, or "@alplus/sdk"
 
 await heartbeat(token, options?);
 ```
@@ -124,7 +123,7 @@ exhausted (set `debug: true` to log them instead).
 ## Observe: error tracking
 
 ```ts
-import { init, captureException, captureMessage, flush, close } from "@alplus/sdk/node"; // or ".", "/cloudflare", "/core"
+import { init, captureException, captureMessage, flush, close } from "@alplus/sdk/node"; // or "." or "/cloudflare"
 
 init({ key: "alp_p_your_ingest_key", environment: "production", release: "1.4.2" });
 // That's it -- uncaught exceptions and unhandled rejections are captured
@@ -441,9 +440,10 @@ doesn't exist in this package yet:
 - A browser offline queue.
 - Source map upload tooling (`alplus-cli sourcemaps upload`).
 - An IIFE/UMD browser build for non-bundler `<script>` tag usage.
-- **Ruby / Rails** — a native `alplus-ruby` gem is the planned integration
-  path for Ruby and Rails apps (not this npm package, and not yet
-  published).
+- **`./core`** is not a host import. Use `.`, `./node`, or `./cloudflare`.
+- **Ruby / Rails** — `alplus-ruby` is the first-party gem. It is not this
+  npm package. Hex and RubyGems first publish is separate from this 0.3.x
+  line.
 
 ## Versioning
 

@@ -33,6 +33,15 @@ const CONTRACT_VERSION = "1.0.0";
 const NON_DETERMINISTIC_KEYS = ["id", "timestamp", "started_at", "duration_ms"];
 
 function contractDir(): string {
+  if (!process.env.ALPLUS_CONTRACT_DIR) {
+    const fallback = new URL("../../../../../sdks/contract", import.meta.url);
+    const { existsSync } = require("node:fs") as typeof import("node:fs");
+    const { fileURLToPath } = require("node:url") as typeof import("node:url");
+    const candidate = fileURLToPath(fallback);
+    if (existsSync(`${candidate}/manifest.json`)) {
+      process.env.ALPLUS_CONTRACT_DIR = candidate;
+    }
+  }
   const dir = process.env.ALPLUS_CONTRACT_DIR;
   if (!dir) {
     throw new Error(

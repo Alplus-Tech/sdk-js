@@ -222,4 +222,19 @@ describe("heartbeat", () => {
     vi.stubGlobal("fetch", undefined);
     await expect(heartbeat("hb_abc123")).resolves.toBeUndefined();
   });
+
+  it("posts start and fail states", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(okResponse());
+    await heartbeat("hb_abc123", { fetchImpl, state: "start" });
+    await heartbeat("hb_abc123", { fetchImpl, state: "fail" });
+    const states = fetchImpl.mock.calls.map(([url]) => new URL(url as string).searchParams.get("state"));
+    expect(states).toEqual(["start", "fail"]);
+  });
+
+  it("warns in debug mode when fetch is missing", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.stubGlobal("fetch", undefined);
+    await heartbeat("hb_abc123", { debug: true });
+    expect(warnSpy).toHaveBeenCalled();
+  });
 });

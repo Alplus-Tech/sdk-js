@@ -91,4 +91,33 @@ describe("sendMeasureHit", () => {
     await sendMeasureHit({ site: "proj_abc", url: "https://shop.example.com/", fetchImpl });
     expect(warnSpy).not.toHaveBeenCalled();
   });
+
+  it("warns in debug mode when custom_event has no name", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const fetchImpl = vi.fn();
+    await sendMeasureHit({ site: "proj_abc", url: "https://shop.example.com/", type: "custom_event", name: "", fetchImpl, debug: true });
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalled();
+  });
+
+  it("warns in debug mode when fetch is missing", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.stubGlobal("fetch", undefined);
+    await sendMeasureHit({ site: "proj_abc", url: "https://shop.example.com/", debug: true });
+    expect(warnSpy).toHaveBeenCalled();
+  });
+
+  it("strips a trailing slash from baseUrl", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(noContentResponse());
+    await sendMeasureHit({ site: "proj_abc", url: "https://shop.example.com/", baseUrl: "https://ingest.example.test/", fetchImpl });
+    expect(fetchImpl.mock.calls[0]![0]).toBe("https://ingest.example.test/m");
+  });
+
+  it("omits name and props on a pageview", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(noContentResponse());
+    await sendMeasureHit({ site: "proj_abc", url: "https://shop.example.com/", fetchImpl });
+    const body = JSON.parse((fetchImpl.mock.calls[0]![1] as RequestInit).body as string) as Record<string, unknown>;
+    expect(body).not.toHaveProperty("name");
+    expect(body).not.toHaveProperty("props");
+  });
 });
