@@ -24,7 +24,7 @@ import `./core`. That entry is adapter-internal.
 ## Monitor: `heartbeat()`
 
 `heartbeat(token, options?)` sends a ping to a **Heartbeat monitor** you've
-created at [console.alplus.dev](https://console.alplus.dev). Heartbeat
+created at [alplus.dev/dashboard](https://alplus.dev/dashboard). Heartbeat
 monitors watch scheduled jobs — cron tasks, nightly batches, queue
 workers — that are supposed to run on a schedule; Alplus alerts you when a
 ping doesn't show up on time or reports failure. Every ping ultimately hits:
