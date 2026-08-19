@@ -1,7 +1,7 @@
 {
   "name": "@alplus/sdk",
   "version": "0.3.0",
-  "description": "Official instrumentation SDK for Alplus (console.alplus.dev): Monitor heartbeat pings, Observe error tracking, and Measure custom events.",
+  "description": "Official instrumentation SDK for Alplus (alplus.dev): Monitor heartbeat pings, Observe error tracking, and Measure custom events.",
   "license": "MIT",
   "type": "module",
   "sideEffects": false,
