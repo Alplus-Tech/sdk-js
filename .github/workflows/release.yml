@@ -55,8 +55,10 @@ jobs:
           ALPLUS_CONTRACT_DIR: ${{ github.workspace }}/.contract-src/sdks/contract
         run: npm test
       - run: npm run build
-      # Trusted publishing (OIDC) and --provenance both need a modern npm; the
+      # Trusted publishing (OIDC) and --provenance both need npm >= 11.5.1; the
       # Node 20 bundle is npm 10, which authenticates with an .npmrc token only.
-      - run: npm install -g npm@latest
+      # Pin the 11 line: npm@latest is 12.x and requires Node 22+, so
+      # `npm@latest` fails EBADENGINE on this runner.
+      - run: npm install -g npm@11
       - run: npm --version
       - run: npm publish --provenance --access public
