@@ -4,6 +4,17 @@
 # Publishing uses npm trusted publishing (OIDC) -- the registry's preferred
 # mechanism, no long-lived NPM_TOKEN. Configure @alplus/sdk's trusted publisher
 # in the npm package settings to accept Alplus-Tech/sdk-js + this workflow.
+#
+# Two prerequisites are easy to get wrong, and both fail as a bare `404 Not
+# Found - PUT` on a package that plainly exists:
+#
+#  1. OIDC needs npm >= 11.5.1. Node 20 ships npm 10, so npm is upgraded below
+#     rather than switching the whole job to Node 24 -- tests must keep running
+#     on the floor of `engines.node`, which is what caught the
+#     `Promise.withResolvers` breakage.
+#  2. No `registry-url:` on setup-node. It writes an .npmrc with
+#     `_authToken=${NODE_AUTH_TOKEN}`, and with no token set npm sends the
+#     literal placeholder and never attempts OIDC.
 name: Release
 
 on:
@@ -36,7 +47,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
-          registry-url: "https://registry.npmjs.org"
 
       - run: npm ci
       - run: npm run typecheck
@@ -45,5 +55,8 @@ jobs:
           ALPLUS_CONTRACT_DIR: ${{ github.workspace }}/.contract-src/sdks/contract
         run: npm test
       - run: npm run build
-      # --provenance requires id-token: write and npm >= 9.5.
+      # Trusted publishing (OIDC) and --provenance both need a modern npm; the
+      # Node 20 bundle is npm 10, which authenticates with an .npmrc token only.
+      - run: npm install -g npm@latest
+      - run: npm --version
       - run: npm publish --provenance --access public
