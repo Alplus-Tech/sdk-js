@@ -16,10 +16,14 @@ const REQUEST_TIMEOUT_MS = 10_000;
 /** 401/403 (bad/scopeless key) and 404 (unrecognized route) can't be fixed by retrying; 400 means the envelope itself is malformed. */
 const PERMANENT_STATUSES: Record<number, true> = { 400: true, 401: true, 403: true, 404: true };
 
+// Deliberate exception to the repo's "prefer Promise.withResolvers" rule, and
+// it must stay one: `withResolvers` needs Node 22, Chrome 119, Safari 17.4 or
+// Firefox 121. This package declares `engines.node >= 18` and runs inside
+// third-party browsers, so on a supported runtime it throws a TypeError on
+// every retry — breaking the never-throw guarantee in the host's app. CI pins
+// Node 20 and fails if anyone changes this back.
 export function delay(ms: number): Promise<void> {
-  const { promise, resolve } = Promise.withResolvers<void>();
-  setTimeout(resolve, ms);
-  return promise;
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function backoffMs(attempt: number): number {

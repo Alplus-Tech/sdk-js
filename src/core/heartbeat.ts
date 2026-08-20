@@ -88,10 +88,11 @@ export function buildPingUrl(token: string, options: HeartbeatOptions & { pingId
   return `${baseUrl}/h/${encodedToken}${pathSuffix}?${searchParams.toString()}`;
 }
 
+// Same deliberate exception as `transport.ts`'s `delay`: `Promise.withResolvers`
+// is Node 22+ and this package supports Node 18. Heartbeat is the load-bearing
+// shipped function; a TypeError here breaks a customer's cron alerting.
 function delay(ms: number): Promise<void> {
-  const { promise, resolve } = Promise.withResolvers<void>();
-  setTimeout(resolve, ms);
-  return promise;
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function backoffMs(attempt: number): number {
