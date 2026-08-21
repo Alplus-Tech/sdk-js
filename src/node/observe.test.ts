@@ -67,7 +67,7 @@ describe("node Observe: automatic global error capture (section 2)", () => {
     await Promise.resolve();
 
     expect(proc.exitCalls).toEqual([1]);
-    const call = fetchImpl.mock.calls.find(([url]) => url === "https://ingest.alplus.dev/e/errors");
+    const call = fetchImpl.mock.calls.find(([url]) => url === "https://ingest.postdeploy.dev/e/errors");
     expect(call).toBeDefined();
     const body = JSON.parse((call![1] as RequestInit).body as string) as { items: Array<Record<string, unknown>> };
     expect(body.items[0]!.mechanism).toBe("uncaughtException");
@@ -82,7 +82,7 @@ describe("node Observe: automatic global error capture (section 2)", () => {
     await vi.runAllTimersAsync();
 
     expect(proc.exitCalls).toEqual([]);
-    const call = fetchImpl.mock.calls.find(([url]) => url === "https://ingest.alplus.dev/e/errors");
+    const call = fetchImpl.mock.calls.find(([url]) => url === "https://ingest.postdeploy.dev/e/errors");
     const body = JSON.parse((call![1] as RequestInit).body as string) as { items: Array<Record<string, unknown>> };
     expect(body.items[0]!.mechanism).toBe("unhandledRejection");
   });
@@ -142,7 +142,7 @@ describe("node Observe: automatic global error capture (section 2)", () => {
     await vi.runAllTimersAsync();
     await Promise.resolve();
 
-    const call = fetchImpl.mock.calls.find(([url]) => url === "https://ingest.alplus.dev/e/errors");
+    const call = fetchImpl.mock.calls.find(([url]) => url === "https://ingest.postdeploy.dev/e/errors");
     const body = JSON.parse((call![1] as RequestInit).body as string) as { items: unknown[] };
     expect(body.items.length).toBe(1);
   });

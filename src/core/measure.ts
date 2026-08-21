@@ -44,7 +44,7 @@
  * helper.
  */
 
-const DEFAULT_BASE_URL = "https://ingest.alplus.dev";
+const DEFAULT_BASE_URL = "https://ingest.postdeploy.dev";
 const REQUEST_TIMEOUT_MS = 5_000;
 
 export interface MeasureHitOptions {
@@ -60,7 +60,7 @@ export interface MeasureHitOptions {
   name?: string;
   /** Accepted for forward compatibility; the server DISCARDS this before rollup and never stores or queries it. Sending it is never an error, just a no-op. */
   props?: Record<string, unknown>;
-  /** Override the ingest origin. Defaults to `https://ingest.alplus.dev`. Mainly for testing against a local/self-hosted ingest endpoint. */
+  /** Override the ingest origin. Defaults to `https://ingest.postdeploy.dev`. Mainly for testing against a local/self-hosted ingest endpoint. */
   baseUrl?: string;
   /** Injectable `fetch` implementation, primarily for tests. Defaults to the platform global `fetch`. */
   fetchImpl?: typeof fetch;
@@ -100,11 +100,11 @@ export async function sendMeasureHit(options: MeasureHitOptions): Promise<void> 
   try {
     const fetchImpl = options.fetchImpl ?? globalThis.fetch;
     if (typeof fetchImpl !== "function") {
-      if (options.debug === true) console.warn("[@alplus/sdk] measure: no fetch implementation available");
+      if (options.debug === true) console.warn("[@postdeploy/sdk] measure: no fetch implementation available");
       return;
     }
     if (options.type === "custom_event" && (options.name === undefined || options.name.length === 0)) {
-      if (options.debug === true) console.warn('[@alplus/sdk] measure: type "custom_event" requires a non-empty name; hit not sent');
+      if (options.debug === true) console.warn('[@postdeploy/sdk] measure: type "custom_event" requires a non-empty name; hit not sent');
       return;
     }
 
@@ -116,6 +116,6 @@ export async function sendMeasureHit(options: MeasureHitOptions): Promise<void> 
       signal: timeoutSignal(),
     });
   } catch (err) {
-    if (options.debug === true) console.warn("[@alplus/sdk] measure: hit failed", err);
+    if (options.debug === true) console.warn("[@postdeploy/sdk] measure: hit failed", err);
   }
 }

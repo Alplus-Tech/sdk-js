@@ -92,7 +92,7 @@ describe("browser instrumentation", () => {
       await flush();
 
       expect(preventDefault).not.toHaveBeenCalled();
-      const call = fetchImpl.mock.calls.find(([url]) => url === "https://ingest.alplus.dev/e/errors");
+      const call = fetchImpl.mock.calls.find(([url]) => url === "https://ingest.postdeploy.dev/e/errors");
       const body = JSON.parse((call![1] as RequestInit).body as string) as { items: Array<Record<string, unknown>> };
       expect(body.items[0]!.mechanism).toBe("onerror");
     });
@@ -108,7 +108,7 @@ describe("browser instrumentation", () => {
       win.fire("unhandledrejection", { reason: new Error("rejected") });
       await flush();
 
-      const call = fetchImpl.mock.calls.find(([url]) => url === "https://ingest.alplus.dev/e/errors");
+      const call = fetchImpl.mock.calls.find(([url]) => url === "https://ingest.postdeploy.dev/e/errors");
       const body = JSON.parse((call![1] as RequestInit).body as string) as { items: Array<Record<string, unknown>> };
       expect(body.items[0]!.mechanism).toBe("onunhandledrejection");
     });
@@ -145,7 +145,7 @@ describe("browser instrumentation", () => {
       captureException(error);
       await flush();
 
-      const call = fetchImpl.mock.calls.find(([url]) => url === "https://ingest.alplus.dev/e/errors");
+      const call = fetchImpl.mock.calls.find(([url]) => url === "https://ingest.postdeploy.dev/e/errors");
       const body = JSON.parse((call![1] as RequestInit).body as string) as { items: unknown[] };
       expect(body.items.length).toBe(1);
     });
@@ -167,7 +167,7 @@ describe("browser instrumentation", () => {
       await flush();
 
       expect(originalPushState).toHaveBeenCalled();
-      const call = fetchImpl.mock.calls.find(([url]) => url === "https://ingest.alplus.dev/e/errors");
+      const call = fetchImpl.mock.calls.find(([url]) => url === "https://ingest.postdeploy.dev/e/errors");
       const body = JSON.parse((call![1] as RequestInit).body as string) as { items: Array<{ breadcrumbs?: Array<{ category?: string }> }> };
       const categories = body.items[0]!.breadcrumbs?.map((b) => b.category) ?? [];
       expect(categories).toContain("navigation");
@@ -193,7 +193,7 @@ describe("browser instrumentation", () => {
       captureException(new Error("boom"));
       await flush();
 
-      const call = fetchImpl.mock.calls.find(([url]) => url === "https://ingest.alplus.dev/e/errors");
+      const call = fetchImpl.mock.calls.find(([url]) => url === "https://ingest.postdeploy.dev/e/errors");
       const body = JSON.parse((call![1] as RequestInit).body as string) as { items: Array<{ breadcrumbs?: Array<{ category?: string; message?: string }> }> };
       const click = body.items[0]!.breadcrumbs?.find((b) => b.category === "ui.click");
       expect(click?.message).toBe("button#submit.btn-primary");
@@ -213,7 +213,7 @@ describe("browser instrumentation", () => {
       await flush();
 
       expect(originalWarn).toHaveBeenCalledWith("careful now");
-      const call = fetchImpl.mock.calls.find(([url]) => url === "https://ingest.alplus.dev/e/errors");
+      const call = fetchImpl.mock.calls.find(([url]) => url === "https://ingest.postdeploy.dev/e/errors");
       const body = JSON.parse((call![1] as RequestInit).body as string) as { items: Array<{ breadcrumbs?: Array<{ category?: string; message?: string }> }> };
       const crumb = body.items[0]!.breadcrumbs?.find((b) => b.category === "console");
       expect(crumb?.message).toBe("careful now");
@@ -232,14 +232,14 @@ describe("browser instrumentation", () => {
       captureException(new Error("boom"));
       await flush();
 
-      const call = fetchImpl.mock.calls.find(([url]) => url === "https://ingest.alplus.dev/e/errors");
+      const call = fetchImpl.mock.calls.find(([url]) => url === "https://ingest.postdeploy.dev/e/errors");
       const body = JSON.parse((call![1] as RequestInit).body as string) as { items: Array<{ breadcrumbs?: Array<{ category?: string; message?: string; level?: string }> }> };
       const crumbs = body.items[0]!.breadcrumbs?.filter((b) => b.category === "console") ?? [];
       expect(crumbs.find((b) => b.message === "cache warmed")?.level).toBe("info");
       expect(crumbs.find((b) => b.message === "payload bytes: 512")?.level).toBe("debug");
     });
 
-    it("the SDK's own [@alplus/sdk] diagnostics are never recorded as breadcrumbs (issue #47)", async () => {
+    it("the SDK's own [@postdeploy/sdk] diagnostics are never recorded as breadcrumbs (issue #47)", async () => {
       const win = fakeWindow();
       vi.stubGlobal("window", win);
       vi.stubGlobal("document", fakeDocument());
@@ -247,11 +247,11 @@ describe("browser instrumentation", () => {
       vi.stubGlobal("fetch", fetchImpl);
 
       init({ key: "alp_p_test", fetchImpl });
-      console.warn("[@alplus/sdk] internal diagnostic line");
+      console.warn("[@postdeploy/sdk] internal diagnostic line");
       captureException(new Error("boom"));
       await flush();
 
-      const call = fetchImpl.mock.calls.find(([url]) => url === "https://ingest.alplus.dev/e/errors");
+      const call = fetchImpl.mock.calls.find(([url]) => url === "https://ingest.postdeploy.dev/e/errors");
       const body = JSON.parse((call![1] as RequestInit).body as string) as { items: Array<{ breadcrumbs?: Array<{ message?: string }> }> };
       const crumbs = body.items[0]!.breadcrumbs ?? [];
       expect(crumbs.some((b) => b.message?.includes("internal diagnostic"))).toBe(false);
@@ -269,7 +269,7 @@ describe("browser instrumentation", () => {
       console.error("request aborted after failure");
       await flush();
 
-      const call = fetchImpl.mock.calls.find(([url]) => url === "https://ingest.alplus.dev/e/errors");
+      const call = fetchImpl.mock.calls.find(([url]) => url === "https://ingest.postdeploy.dev/e/errors");
       const body = JSON.parse((call![1] as RequestInit).body as string) as { items: Array<{ breadcrumbs?: Array<{ message?: string; data?: { after_error?: boolean } }> }> };
       const crumb = body.items[0]!.breadcrumbs?.find((b) => b.message === "request aborted after failure");
       expect(crumb?.data?.after_error).toBe(true);
@@ -289,7 +289,7 @@ describe("browser instrumentation", () => {
       captureException(new Error("boom"));
       await flush();
 
-      const call = appFetch.mock.calls.find(([url]) => url === "https://ingest.alplus.dev/e/errors");
+      const call = appFetch.mock.calls.find(([url]) => url === "https://ingest.postdeploy.dev/e/errors");
       const body = JSON.parse((call![1] as RequestInit).body as string) as { items: Array<{ breadcrumbs?: Array<{ category?: string; message?: string }> }> };
       const crumb = body.items[0]!.breadcrumbs?.find((b) => b.category === "fetch");
       expect(crumb?.message).toBe("GET https://api.example.com/data");
@@ -308,7 +308,7 @@ describe("browser instrumentation", () => {
       captureException(new Error("boom"));
       await flush();
 
-      const call = fetchImpl.mock.calls.find(([url]) => url === "https://ingest.alplus.dev/e/errors");
+      const call = fetchImpl.mock.calls.find(([url]) => url === "https://ingest.postdeploy.dev/e/errors");
       const body = JSON.parse((call![1] as RequestInit).body as string) as { items: Array<{ breadcrumbs?: Array<{ data?: Record<string, unknown> }> }> };
       const crumb = body.items[0]!.breadcrumbs!.find((b) => b.data !== undefined)!;
       expect(crumb.data!.password).toBe("[Redacted]");
@@ -332,7 +332,7 @@ describe("browser instrumentation", () => {
       captureMessage("also scoped");
       await flush();
 
-      const call = fetchImpl.mock.calls.find(([url]) => url === "https://ingest.alplus.dev/e/errors");
+      const call = fetchImpl.mock.calls.find(([url]) => url === "https://ingest.postdeploy.dev/e/errors");
       const body = JSON.parse((call![1] as RequestInit).body as string) as { items: Array<Record<string, unknown>> };
       for (const item of body.items) {
         expect(item.user).toEqual({ id: "u1", email: "jane@example.com" });
@@ -354,7 +354,7 @@ describe("browser instrumentation", () => {
       captureException(new Error("boom"));
       await flush();
 
-      const call = fetchImpl.mock.calls.find(([url]) => url === "https://ingest.alplus.dev/e/errors");
+      const call = fetchImpl.mock.calls.find(([url]) => url === "https://ingest.postdeploy.dev/e/errors");
       const body = JSON.parse((call![1] as RequestInit).body as string) as { items: Array<Record<string, unknown>> };
       expect(body.items[0]!.user).toBeUndefined();
     });

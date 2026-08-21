@@ -43,7 +43,7 @@ let maxBreadcrumbs = 30;
 let debug = false;
 
 function debugWarn(message: string): void {
-  if (debug) console.warn(`[@alplus/sdk] node: ${message}`);
+  if (debug) console.warn(`[@postdeploy/sdk] node: ${message}`);
 }
 
 function provideScope(): ScopeSnapshot {

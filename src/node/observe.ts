@@ -63,7 +63,7 @@ function registerGlobalHandlers(processImpl: NodeProcessLike, debug: boolean): v
   uncaughtExceptionListener = (err: unknown) => {
     captureException(err, { mechanism: "uncaughtException" });
     void flush(UNCAUGHT_FLUSH_TIMEOUT_MS).finally(() => {
-      if (debug) console.warn("[@alplus/sdk] node: uncaughtException captured; exiting", err);
+      if (debug) console.warn("[@postdeploy/sdk] node: uncaughtException captured; exiting", err);
       processImpl.exit(1);
     });
   };

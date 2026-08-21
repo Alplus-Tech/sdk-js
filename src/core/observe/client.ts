@@ -1,5 +1,5 @@
 /**
- * @alplus/sdk Observe client: `init`, `captureException`, `captureMessage`,
+ * @postdeploy/sdk Observe client: `init`, `captureException`, `captureMessage`,
  * `flush`, `close`. Platform-neutral -- `./browser`, `./node`, and
  * `./cloudflare` re-export this verbatim except for how each schedules (or
  * deliberately doesn't schedule) the idle-flush timer, since Workers
@@ -59,7 +59,7 @@ export function setScopeProvider(provider: ScopeProvider | null): void {
   scopeProvider = provider;
 }
 
-const DEFAULT_BASE_URL = "https://ingest.alplus.dev";
+const DEFAULT_BASE_URL = "https://ingest.postdeploy.dev";
 const DEFAULT_FLUSH_TIMEOUT_MS = 2_000;
 
 export interface ObserveInitOptions {
@@ -69,7 +69,7 @@ export interface ObserveInitOptions {
   environment?: string;
   /** Release identifier (git SHA, semver tag) attached to every captured event. */
   release?: string;
-  /** Override the ingest origin. Defaults to `https://ingest.alplus.dev`. Mainly for testing against a local/self-hosted ingest endpoint. */
+  /** Override the ingest origin. Defaults to `https://ingest.postdeploy.dev`. Mainly for testing against a local/self-hosted ingest endpoint. */
   baseUrl?: string;
   /** Injectable `fetch` implementation, primarily for tests. Defaults to the platform global `fetch`. */
   fetchImpl?: typeof fetch;
@@ -91,7 +91,7 @@ export interface ObserveInitOptions {
    * `process.on("uncaughtException"/"unhandledRejection")` in Node. Default
    * `true` on both. Cloudflare has no process-global hooks to attach, so its
    * `init` ignores this option entirely -- use `wrapHandler`/`wrapScheduled`
-   * from `@alplus/sdk/cloudflare` instead.
+   * from `@postdeploy/sdk/cloudflare` instead.
    */
   captureUnhandled?: boolean;
   /**
@@ -182,7 +182,7 @@ function debugWarn(message: string, ...rest: unknown[]): void {
   // packages/sdk is deliberately exempt from the repo's no-console rule:
   // this IS the documented debug-diagnostics channel for a published
   // package that cannot depend on the app's own logger.
-  console.warn(`[@alplus/sdk] ${message}`, ...rest);
+  console.warn(`[@postdeploy/sdk] ${message}`, ...rest);
 }
 
 /**

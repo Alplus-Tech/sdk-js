@@ -52,7 +52,7 @@ describe("cloudflare wrapHandler / wrapScheduled", () => {
     expect(ctx.waited.length).toBe(1);
     await ctx.waited[0];
 
-    const call = fetchImpl.mock.calls.find(([url]) => url === "https://ingest.alplus.dev/e/errors");
+    const call = fetchImpl.mock.calls.find(([url]) => url === "https://ingest.postdeploy.dev/e/errors");
     expect(call).toBeDefined();
     const body = JSON.parse((call![1] as RequestInit).body as string) as { items: Array<Record<string, unknown>> };
     expect(body.items[0]!.mechanism).toBe("instrumentation");
@@ -71,7 +71,7 @@ describe("cloudflare wrapHandler / wrapScheduled", () => {
     expect(ctx.waited.length).toBe(1);
     await ctx.waited[0];
 
-    const call = fetchImpl.mock.calls.find(([url]) => url === "https://ingest.alplus.dev/e/errors");
+    const call = fetchImpl.mock.calls.find(([url]) => url === "https://ingest.postdeploy.dev/e/errors");
     expect(call).toBeDefined();
   });
 
@@ -88,7 +88,7 @@ describe("cloudflare wrapHandler / wrapScheduled", () => {
     captureException(new Error("manual"), { user: { id: "u1" }, tags: { region: "eu" } });
     await flush();
 
-    const bodies = fetchImpl.mock.calls.filter(([url]) => url === "https://ingest.alplus.dev/e/errors").map(([, requestInit]) => JSON.parse((requestInit as RequestInit).body as string) as { items: Array<Record<string, unknown>> });
+    const bodies = fetchImpl.mock.calls.filter(([url]) => url === "https://ingest.postdeploy.dev/e/errors").map(([, requestInit]) => JSON.parse((requestInit as RequestInit).body as string) as { items: Array<Record<string, unknown>> });
     const manualItem = bodies.flatMap((b) => b.items).find((item) => (item.exception as { value?: string } | undefined)?.value === "manual");
     expect(manualItem?.user).toEqual({ id: "u1" });
     expect(manualItem?.tags).toEqual({ region: "eu" });

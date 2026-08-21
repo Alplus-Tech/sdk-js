@@ -17,7 +17,7 @@ describe("sendMeasureHit", () => {
 
     expect(fetchImpl).toHaveBeenCalledTimes(1);
     const [url, requestInit] = fetchImpl.mock.calls[0]! as [string, RequestInit];
-    expect(url).toBe("https://ingest.alplus.dev/m");
+    expect(url).toBe("https://ingest.postdeploy.dev/m");
     expect((requestInit.headers as Record<string, string>)["Content-Type"]).toBe("application/json");
     expect(requestInit.headers).not.toHaveProperty("Origin");
 

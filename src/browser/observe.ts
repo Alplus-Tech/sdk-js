@@ -39,7 +39,7 @@ function registerPagehideFlush(debug: boolean): void {
     const fetchImpl = globalThis.fetch;
     if (typeof fetchImpl !== "function") return;
     fetchImpl(request.url, { method: "POST", headers: request.headers, body: request.body, keepalive: true }).catch((err: unknown) => {
-      if (debug) console.warn("[@alplus/sdk] observe: pagehide flush failed", err);
+      if (debug) console.warn("[@postdeploy/sdk] observe: pagehide flush failed", err);
     });
   });
 }

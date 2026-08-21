@@ -77,14 +77,14 @@ describe("Observe client", () => {
     await flush();
 
     const call = fetchImpl.mock.calls[0]!;
-    expect(call[0]).toBe("https://ingest.alplus.dev/e/errors");
+    expect(call[0]).toBe("https://ingest.postdeploy.dev/e/errors");
     const requestInit = call[1] as RequestInit;
     expect((requestInit.headers as Record<string, string>).Authorization).toBe("Bearer alp_p_test");
 
     const body = lastBody(fetchImpl);
     const header = body.header as { key: string; sdk: { name: string; version: string } };
     expect(header.key).toBe("alp_p_test");
-    expect(header.sdk.name).toBe("@alplus/sdk");
+    expect(header.sdk.name).toBe("@postdeploy/sdk");
 
     const item = (body.items as Array<Record<string, unknown>>)[0]!;
     expect(item.id).toMatch(/^err_/);

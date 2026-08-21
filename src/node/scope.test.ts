@@ -7,7 +7,7 @@ function okResponse(): Response {
 }
 
 async function capturedItem(fetchImpl: ReturnType<typeof vi.fn>): Promise<Record<string, unknown>> {
-  const call = fetchImpl.mock.calls.find(([url]: [string]) => url === "https://ingest.alplus.dev/e/errors");
+  const call = fetchImpl.mock.calls.find(([url]: [string]) => url === "https://ingest.postdeploy.dev/e/errors");
   const body = JSON.parse((call![1] as RequestInit).body as string) as { items: Array<Record<string, unknown>> };
   return body.items[0]!;
 }
@@ -36,7 +36,7 @@ describe("node scope: AsyncLocalStorage-backed, per-withScope (section 4)", () =
     captureException(new Error("outside"));
     await flush();
 
-    const bodies = fetchImpl.mock.calls.filter(([url]) => url === "https://ingest.alplus.dev/e/errors").map(([, requestInit]) => JSON.parse((requestInit as RequestInit).body as string) as { items: Array<Record<string, unknown>> });
+    const bodies = fetchImpl.mock.calls.filter(([url]) => url === "https://ingest.postdeploy.dev/e/errors").map(([, requestInit]) => JSON.parse((requestInit as RequestInit).body as string) as { items: Array<Record<string, unknown>> });
     const items = bodies.flatMap((b) => b.items);
     const insideItem = items.find((i) => (i.exception as { value?: string }).value === "inside")!;
     const outsideItem = items.find((i) => (i.exception as { value?: string }).value === "outside")!;
@@ -67,7 +67,7 @@ describe("node scope: AsyncLocalStorage-backed, per-withScope (section 4)", () =
     await Promise.all([requestA, requestB]);
     await flush();
 
-    const bodies = fetchImpl.mock.calls.filter(([url]) => url === "https://ingest.alplus.dev/e/errors").map(([, requestInit]) => JSON.parse((requestInit as RequestInit).body as string) as { items: Array<Record<string, unknown>> });
+    const bodies = fetchImpl.mock.calls.filter(([url]) => url === "https://ingest.postdeploy.dev/e/errors").map(([, requestInit]) => JSON.parse((requestInit as RequestInit).body as string) as { items: Array<Record<string, unknown>> });
     const items = bodies.flatMap((b) => b.items);
     const itemA = items.find((i) => (i.exception as { value?: string }).value === "error-a")!;
     const itemB = items.find((i) => (i.exception as { value?: string }).value === "error-b")!;
@@ -105,7 +105,7 @@ describe("node scope: AsyncLocalStorage-backed, per-withScope (section 4)", () =
     });
     await flush();
 
-    const bodies = fetchImpl.mock.calls.filter(([url]) => url === "https://ingest.alplus.dev/e/errors").map(([, requestInit]) => JSON.parse((requestInit as RequestInit).body as string) as { items: Array<Record<string, unknown>> });
+    const bodies = fetchImpl.mock.calls.filter(([url]) => url === "https://ingest.postdeploy.dev/e/errors").map(([, requestInit]) => JSON.parse((requestInit as RequestInit).body as string) as { items: Array<Record<string, unknown>> });
     const items = bodies.flatMap((b) => b.items);
     const innerItem = items.find((i) => (i.exception as { value?: string }).value === "inner-error")!;
     const outerItem = items.find((i) => (i.exception as { value?: string }).value === "outer-error")!;

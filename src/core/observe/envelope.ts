@@ -156,7 +156,7 @@ export function capFrames(frames: readonly WireStackFrame[], maxChars: number): 
 /**
  * Caps a custom fingerprint override to the server's own bounds: at most
  * `maxEntries` entries, each at most `maxChars` characters -- mirrors
- * `sdks/ruby/lib/alplus/envelope.rb`'s `cap_fingerprint`. Returns
+ * `sdks/ruby/lib/postdeploy/envelope.rb`'s `cap_fingerprint`. Returns
  * `undefined` for an empty/undefined input so the caller can omit the wire
  * key.
  */

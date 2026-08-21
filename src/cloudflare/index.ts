@@ -1,5 +1,5 @@
 /**
- * `@alplus/sdk/cloudflare` -- Cloudflare Workers (workerd) entry point.
+ * `@postdeploy/sdk/cloudflare` -- Cloudflare Workers (workerd) entry point.
  * v0.3.0 adds `wrapHandler`/`wrapScheduled` (docs/sdk/02-dx-improvements.md
  * section 2, `./wrap.ts`) for automatic error capture -- workerd has no
  * process-global hooks to attach ambiently, so this is an explicit wrapper

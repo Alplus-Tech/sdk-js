@@ -62,7 +62,7 @@ describe("browser Observe init", () => {
 
     expect(fetchImpl).toHaveBeenCalledTimes(1);
     const [url, requestInit] = fetchImpl.mock.calls[0]! as [string, RequestInit];
-    expect(url).toBe("https://ingest.alplus.dev/e/errors");
+    expect(url).toBe("https://ingest.postdeploy.dev/e/errors");
     expect(requestInit.keepalive).toBe(true);
     expect((requestInit.headers as Record<string, string>).Authorization).toBe("Bearer alp_p_test");
   });

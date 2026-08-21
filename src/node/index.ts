@@ -1,5 +1,5 @@
 /**
- * `@alplus/sdk/node` -- Node.js >= 18 entry point. v0.3.0 adds automatic
+ * `@postdeploy/sdk/node` -- Node.js >= 18 entry point. v0.3.0 adds automatic
  * `uncaughtException`/`unhandledRejection` capture (default on -- see
  * `./observe.ts`) and request-scoped scope/breadcrumbs via
  * `AsyncLocalStorage` (`setUser`/`setTag`/`setContext`/`addBreadcrumb`,

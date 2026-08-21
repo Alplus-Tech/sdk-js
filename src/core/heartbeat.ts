@@ -1,6 +1,6 @@
 /**
- * @alplus/sdk core heartbeat transport (docs/sdk/01-sdk-spec.md section 3.5,
- * 5.5; heartbeat-v2 contract "SDK (@alplus/sdk v0.1.0)" section).
+ * @postdeploy/sdk core heartbeat transport (docs/sdk/01-sdk-spec.md section 3.5,
+ * 5.5; heartbeat-v2 contract "SDK (@postdeploy/sdk v0.1.0)" section).
  *
  * v0.1.0 ships ONLY this module -- Observe/Measure land in later 0.x minors
  * (see packages/sdk/README.md's scope note). `./node`, `./cloudflare`, and
@@ -9,7 +9,7 @@
  * workerd, browsers), so there is no platform branching to do here.
  */
 
-const DEFAULT_BASE_URL = "https://ingest.alplus.dev";
+const DEFAULT_BASE_URL = "https://ingest.postdeploy.dev";
 const MAX_ATTEMPTS = 3;
 const BACKOFF_BASE_MS = 500;
 const BACKOFF_JITTER = 0.5;
@@ -27,7 +27,7 @@ export interface HeartbeatOptions {
   message?: string;
   /** Idempotency id reused across retries. Invalid custom values fall back to a fresh client-generated id. */
   pingId?: string;
-  /** Override ingest origin. Defaults to https://ingest.alplus.dev. */
+  /** Override ingest origin. Defaults to https://ingest.postdeploy.dev. */
   baseUrl?: string;
   /** Injectable fetch implementation, primarily for tests. Defaults to the global `fetch`. */
   fetchImpl?: typeof fetch;
@@ -168,20 +168,20 @@ export async function heartbeat(token: string, options: HeartbeatOptions = {}): 
 
     if (typeof fetchImpl !== "function") {
       if (debug) {
-        console.warn(`[@alplus/sdk] heartbeat: no fetch implementation available (token "${token}")`);
+        console.warn(`[@postdeploy/sdk] heartbeat: no fetch implementation available (token "${token}")`);
       }
       return;
     }
 
     const result = await pingWithRetries(url, fetchImpl);
     if (debug && result.outcome === "exhausted") {
-      console.warn(`[@alplus/sdk] heartbeat: exhausted ${MAX_ATTEMPTS} attempts (token "${token}")`, result.lastError);
+      console.warn(`[@postdeploy/sdk] heartbeat: exhausted ${MAX_ATTEMPTS} attempts (token "${token}")`, result.lastError);
     }
   } catch (err) {
     // Belt-and-suspenders: guarantees the "never throw into the host app"
     // contract (spec section 5.5) even against an unforeseen internal bug.
     if (debug) {
-      console.warn(`[@alplus/sdk] heartbeat: internal error (token "${token}")`, err);
+      console.warn(`[@postdeploy/sdk] heartbeat: internal error (token "${token}")`, err);
     }
   }
 }

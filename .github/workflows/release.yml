@@ -1,8 +1,8 @@
-# Release for @alplus/sdk to npm, destined for Alplus-Tech/sdk-js.
+# Release for @postdeploy/sdk to npm, destined for Alplus-Tech/sdk-js.
 # Manual or tag-driven only; a product change can never publish an SDK.
 #
 # Publishing uses npm trusted publishing (OIDC) -- the registry's preferred
-# mechanism, no long-lived NPM_TOKEN. Configure @alplus/sdk's trusted publisher
+# mechanism, no long-lived NPM_TOKEN. Configure @postdeploy/sdk's trusted publisher
 # in the npm package settings to accept Alplus-Tech/sdk-js + this workflow.
 #
 # Two prerequisites are easy to get wrong, and both fail as a bare `404 Not
@@ -27,7 +27,7 @@ permissions:
   id-token: write # npm trusted publishing (provenance)
 
 env:
-  CONTRACT_REF: contract-v1.0.0
+  CONTRACT_REF: contract-v1.1.0
 
 jobs:
   publish:

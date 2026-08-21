@@ -1,5 +1,5 @@
 /**
- * `@alplus/sdk` (unqualified package root) -- browser/neutral entry point.
+ * `@postdeploy/sdk` (unqualified package root) -- browser/neutral entry point.
  * v0.3.0 adds automatic global error capture (`window.onerror`/
  * `onunhandledrejection`, default on), breadcrumbs (manual `addBreadcrumb`
  * plus automatic navigation/click/console/fetch instrumentation), and scope

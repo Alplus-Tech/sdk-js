@@ -13,7 +13,7 @@ function errorResponse(status: number, retryAfter?: string): Response {
 describe("buildPingUrl", () => {
   it("builds the default URL with only a ping_id query param", () => {
     const url = buildPingUrl("hb_abc123", { pingId: "ping-1" });
-    expect(url).toBe("https://ingest.alplus.dev/h/hb_abc123?ping_id=ping-1");
+    expect(url).toBe("https://ingest.postdeploy.dev/h/hb_abc123?ping_id=ping-1");
   });
 
   it("encodes the token", () => {
@@ -28,17 +28,17 @@ describe("buildPingUrl", () => {
 
   it("maps state via the ?state= query param", () => {
     const url = buildPingUrl("hb_abc123", { pingId: "ping-1", state: "start" });
-    expect(url).toBe("https://ingest.alplus.dev/h/hb_abc123?state=start&ping_id=ping-1");
+    expect(url).toBe("https://ingest.postdeploy.dev/h/hb_abc123?state=start&ping_id=ping-1");
   });
 
   it("maps exitCode 0 to the /0 path suffix (finish)", () => {
     const url = buildPingUrl("hb_abc123", { pingId: "ping-1", exitCode: 0 });
-    expect(url).toBe("https://ingest.alplus.dev/h/hb_abc123/0?ping_id=ping-1");
+    expect(url).toBe("https://ingest.postdeploy.dev/h/hb_abc123/0?ping_id=ping-1");
   });
 
   it("maps a non-zero exitCode to its /N path suffix (fail)", () => {
     const url = buildPingUrl("hb_abc123", { pingId: "ping-1", exitCode: 17 });
-    expect(url).toBe("https://ingest.alplus.dev/h/hb_abc123/17?ping_id=ping-1");
+    expect(url).toBe("https://ingest.postdeploy.dev/h/hb_abc123/17?ping_id=ping-1");
   });
 
   it("clamps an out-of-range exitCode into 0-255", () => {
@@ -48,12 +48,12 @@ describe("buildPingUrl", () => {
 
   it("prefers state over exitCode when both are somehow set", () => {
     const url = buildPingUrl("hb_abc123", { pingId: "ping-1", state: "fail", exitCode: 0 });
-    expect(url).toBe("https://ingest.alplus.dev/h/hb_abc123?state=fail&ping_id=ping-1");
+    expect(url).toBe("https://ingest.postdeploy.dev/h/hb_abc123?state=fail&ping_id=ping-1");
   });
 
   it("appends a message under ?msg=", () => {
     const url = buildPingUrl("hb_abc123", { pingId: "ping-1", message: "boom" });
-    expect(url).toBe("https://ingest.alplus.dev/h/hb_abc123?ping_id=ping-1&msg=boom");
+    expect(url).toBe("https://ingest.postdeploy.dev/h/hb_abc123?ping_id=ping-1&msg=boom");
   });
 
   it("truncates a message over 2048 chars silently", () => {

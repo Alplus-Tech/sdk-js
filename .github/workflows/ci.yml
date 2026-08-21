@@ -1,4 +1,4 @@
-# CI for the JavaScript SDK (@alplus/sdk), destined for Alplus-Tech/sdk-js.
+# CI for the JavaScript SDK (@postdeploy/sdk), destined for Alplus-Tech/sdk-js.
 # Lives inside packages/sdk so it becomes the repo-root workflow after the split
 # (issue #26). GitHub ignores it here in the monorepo: it only reads workflows
 # under the repository-root .github/workflows.
@@ -19,7 +19,7 @@ concurrency:
 
 env:
   # Pinned contract version. Bump only through a product sdk-compat change.
-  CONTRACT_REF: contract-v1.0.0
+  CONTRACT_REF: contract-v1.1.0
 
 jobs:
   build-and-test:

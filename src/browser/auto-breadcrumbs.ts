@@ -103,7 +103,7 @@ const CONSOLE_METHOD_LEVEL = { log: "info", info: "info", debug: "debug", warn: 
  * the application's log narrative, so the console patch skips them
  * (issue #47's timeline must contain application output only).
  */
-const SDK_INTERNAL_PREFIX = "[@alplus/sdk]";
+const SDK_INTERNAL_PREFIX = "[@postdeploy/sdk]";
 
 function registerConsole(con: Console): void {
   (["log", "info", "debug", "warn", "error"] as const).forEach((method) => {

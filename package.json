@@ -1,7 +1,7 @@
 {
-  "name": "@alplus/sdk",
-  "version": "0.4.0",
-  "description": "Official instrumentation SDK for Alplus (alplus.dev): Monitor heartbeat pings, Observe error tracking, and Measure custom events.",
+  "name": "@postdeploy/sdk",
+  "version": "0.5.0",
+  "description": "Official SDK for PostDeploy: errors, analytics, and cron monitoring after deployment.",
   "license": "MIT",
   "type": "module",
   "sideEffects": false,
@@ -23,7 +23,7 @@
     "type": "git",
     "url": "https://github.com/Alplus-Tech/sdk-js"
   },
-  "homepage": "https://alplus.dev",
+  "homepage": "https://postdeploy.dev",
   "bugs": "https://github.com/Alplus-Tech/sdk-js/issues",
   "files": [
     "dist",

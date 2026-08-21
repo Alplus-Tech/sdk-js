@@ -26,7 +26,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { __resetForTests, captureException, captureMessage, flush, init } from "./client";
 import { sendMeasureHit } from "../measure";
 
-// The golden contract is owned by the AL+ product (Alplus-Tech/alplus) and
+// The golden contract is owned by the PostDeploy product (Alplus-Tech/alplus) and
 // consumed as an explicit, immutable input (issue #26): ALPLUS_CONTRACT_DIR
 // points at a checkout of `sdks/contract` at the pinned contract tag. There is
 // no monorepo-relative fallback -- an absent variable throws loudly.

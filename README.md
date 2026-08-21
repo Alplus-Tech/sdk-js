@@ -1,6 +1,6 @@
-# @alplus/sdk
+# @postdeploy/sdk
 
-Official instrumentation SDK for [Alplus](https://alplus.dev), the
+Official instrumentation SDK for [PostDeploy](https://postdeploy.dev), the
 Cloudflare-native dev toolkit built around three pillars — **Monitor**
 (uptime and heartbeat checks), **Observe** (error tracking), and **Measure**
 (product analytics) — on one platform, one dashboard, and one bill. This
@@ -13,7 +13,7 @@ breadcrumbs, and scope (`setUser`/`setTag`/`setContext`) for Observe; and
 ## Install
 
 ```sh
-npm install @alplus/sdk
+npm install @postdeploy/sdk
 ```
 
 Zero runtime dependencies. Requires Node.js >= 18 for the `/node` entry
@@ -24,13 +24,13 @@ import `./core`. That entry is adapter-internal.
 ## Monitor: `heartbeat()`
 
 `heartbeat(token, options?)` sends a ping to a **Heartbeat monitor** you've
-created at [alplus.dev/dashboard](https://alplus.dev/dashboard). Heartbeat
+created at [postdeploy.dev/dashboard](https://postdeploy.dev/dashboard). Heartbeat
 monitors watch scheduled jobs — cron tasks, nightly batches, queue
-workers — that are supposed to run on a schedule; Alplus alerts you when a
+workers — that are supposed to run on a schedule; PostDeploy alerts you when a
 ping doesn't show up on time or reports failure. Every ping ultimately hits:
 
 ```
-GET|POST https://ingest.alplus.dev/h/{token}
+GET|POST https://ingest.postdeploy.dev/h/{token}
 ```
 
 so the SDK is just a small, resilient, typed wrapper around a single HTTP
@@ -48,7 +48,7 @@ Use `ctx.waitUntil()` so the ping doesn't block (or get cancelled when) the
 scheduled handler returns:
 
 ```ts
-import { heartbeat } from "@alplus/sdk/cloudflare";
+import { heartbeat } from "@postdeploy/sdk/cloudflare";
 
 export default {
   async scheduled(event, env, ctx) {
@@ -62,7 +62,7 @@ export default {
 #### Node.js (cron job or standalone script)
 
 ```ts
-import { heartbeat } from "@alplus/sdk/node";
+import { heartbeat } from "@postdeploy/sdk/node";
 
 try {
   await runNightlyJob();
@@ -94,13 +94,13 @@ option:
 
 ```sh
 # crontab -e
-0 2 * * * /usr/local/bin/nightly-backup.sh; curl -fsS "https://ingest.alplus.dev/h/hb_your_token/$?" > /dev/null
+0 2 * * * /usr/local/bin/nightly-backup.sh; curl -fsS "https://ingest.postdeploy.dev/h/hb_your_token/$?" > /dev/null
 ```
 
 ### `heartbeat()` options reference
 
 ```ts
-import { heartbeat } from "@alplus/sdk/node"; // or /cloudflare, or "@alplus/sdk"
+import { heartbeat } from "@postdeploy/sdk/node"; // or /cloudflare, or "@postdeploy/sdk"
 
 await heartbeat(token, options?);
 ```
@@ -111,7 +111,7 @@ await heartbeat(token, options?);
 | `exitCode` | `number` | _(none)_ | Shortcut for `state`: `0` maps to `finish`, any value `1`-`255` maps to `fail`. Mutually exclusive with `state`. |
 | `message` | `string` | _(none)_ | Diagnostic text attached to `fail` pings, shown on the incident in the console. Silently truncated to 2048 characters. |
 | `pingId` | `string` | a fresh generated id | Idempotency key, reused across retries of one call. |
-| `baseUrl` | `string` | `https://ingest.alplus.dev` | Override the ingest origin. |
+| `baseUrl` | `string` | `https://ingest.postdeploy.dev` | Override the ingest origin. |
 | `fetchImpl` | `typeof fetch` | the platform's global `fetch` | Inject a custom `fetch` implementation — primarily for unit tests. |
 | `debug` | `boolean` | `false` | Log a `console.warn` when retries are exhausted or an internal error occurs. |
 
@@ -123,7 +123,7 @@ exhausted (set `debug: true` to log them instead).
 ## Observe: error tracking
 
 ```ts
-import { init, captureException, captureMessage, flush, close } from "@alplus/sdk/node"; // or "." or "/cloudflare"
+import { init, captureException, captureMessage, flush, close } from "@postdeploy/sdk/node"; // or "." or "/cloudflare"
 
 init({ key: "alp_p_your_ingest_key", environment: "production", release: "1.4.2" });
 // That's it -- uncaught exceptions and unhandled rejections are captured
@@ -200,18 +200,18 @@ Installing the SDK captures errors by default — opt out with
   instead:
 
   ```ts
-  import { init, wrapHandler, wrapScheduled } from "@alplus/sdk/cloudflare";
+  import { init, wrapHandler, wrapScheduled } from "@postdeploy/sdk/cloudflare";
 
   export default {
     fetch: wrapHandler(async (request, env, ctx) => {
-      init({ key: env.ALPLUS_KEY, environment: "production" });
+      init({ key: env.POSTDEPLOY_API_KEY, environment: "production" });
       // application code; a thrown error is captured, flushed via
       // ctx.waitUntil, and re-thrown -- the Worker's own error response
       // still happens exactly as it would with no SDK installed.
       return handleRequest(request);
     }),
     scheduled: wrapScheduled(async (controller, env, ctx) => {
-      init({ key: env.ALPLUS_KEY, environment: "production" });
+      init({ key: env.POSTDEPLOY_API_KEY, environment: "production" });
       await runScheduledTask();
     }),
   };
@@ -225,7 +225,7 @@ Every captured event — automatic or manual — carries `mechanism`:
 ### Breadcrumbs
 
 ```ts
-import { addBreadcrumb } from "@alplus/sdk"; // or "/node"
+import { addBreadcrumb } from "@postdeploy/sdk"; // or "/node"
 
 addBreadcrumb({ category: "checkout", message: "clicked pay", level: "info" });
 ```
@@ -257,7 +257,7 @@ scrubbed of `password`/`secret`/`token`/`api_key`-shaped keys the same way
 ### Scope: `setUser`/`setTag`/`setContext`
 
 ```ts
-import { setUser, setTag, setContext } from "@alplus/sdk"; // or "/node"
+import { setUser, setTag, setContext } from "@postdeploy/sdk"; // or "/node"
 
 setUser({ id: "user_123", email: "jane@example.com" }); // or null to clear
 setTag("plan", "agency");
@@ -275,7 +275,7 @@ user, no concurrent requests) and a real bug on a server (request A's
   `withScope(fn)`:
 
   ```ts
-  import { withScope, setUser, captureException } from "@alplus/sdk/node";
+  import { withScope, setUser, captureException } from "@postdeploy/sdk/node";
 
   async function handleRequest(req: Request) {
     return withScope(async () => {
@@ -329,11 +329,11 @@ rather than discovered by a server rejection.
 
   ```ts
   import { Hono } from "hono";
-  import { init, captureException, flush } from "@alplus/sdk/cloudflare";
+  import { init, captureException, flush } from "@postdeploy/sdk/cloudflare";
 
-  const app = new Hono<{ Bindings: { ALPLUS_KEY: string } }>();
+  const app = new Hono<{ Bindings: { POSTDEPLOY_API_KEY: string } }>();
   app.use("*", async (c, next) => {
-    init({ key: c.env.ALPLUS_KEY, environment: "production" });
+    init({ key: c.env.POSTDEPLOY_API_KEY, environment: "production" });
     await next();
   });
   app.onError((err, c) => {
@@ -357,7 +357,7 @@ See [Roadmap](#roadmap).
 
 ## Measure: `sendMeasureHit()`
 
-Available from the browser entry point (`@alplus/sdk`) only as of 0.3.0 —
+Available from the browser entry point (`@postdeploy/sdk`) only as of 0.3.0 —
 **not** from `/node` or `/cloudflare`. `POST /m`'s only auth is a real
 browser's own `Origin` header, which neither a Node nor a Workers `fetch`
 call ever carries, so calling this from either of those adapters always
@@ -366,7 +366,7 @@ working-looking trap (`docs/sdk/02-dx-improvements.md` section 5). Use the
 first-party `/m.js` browser tracker for anything server-side.
 
 ```ts
-import { sendMeasureHit } from "@alplus/sdk"; // browser only
+import { sendMeasureHit } from "@postdeploy/sdk"; // browser only
 
 await sendMeasureHit({
   site: "proj_your_project_id",
@@ -379,7 +379,7 @@ await sendMeasureHit({
 This is a low-level, programmatic wrapper around `POST /m` for use
 somewhere a `<script>` tag isn't an option in a real browser page — an SPA
 route change, a dynamically-injected form submit handler. It is **not** a
-replacement for Alplus's first-party browser tracker script; a real website
+replacement for PostDeploy's first-party browser tracker script; a real website
 should load that script instead.
 
 `POST /m` has no API key: the only gate is the request's `Origin` header,
@@ -426,22 +426,22 @@ recovering a lost one. Never throws.
 
 ## Roadmap
 
-Not available in `@alplus/sdk@0.3.x` — no stub exports, no
+Not available in `@postdeploy/sdk@0.3.x` — no stub exports, no
 reserved-but-throwing placeholders. If it isn't documented above, it
 doesn't exist in this package yet:
 
 - `beforeSend`, `sampleRate`, and the `tunnel` proxy option.
-- Framework helpers: `@alplus/sdk/hono`, `/express`, `/react`.
+- Framework helpers: `@postdeploy/sdk/hono`, `/express`, `/react`.
 - Automatic outbound-`fetch` breadcrumbs on Node/Cloudflare, and any ambient
   breadcrumb/scope API on Cloudflare at all (pass `breadcrumbs`/`user`/
   `tags`/`contexts` explicitly per capture there instead).
 - `XMLHttpRequest` breadcrumbs (browser `fetch` breadcrumbs ship; XHR does
   not).
 - A browser offline queue.
-- Source map upload tooling (`alplus-cli sourcemaps upload`).
+- Source map upload tooling (`postdeploy-cli sourcemaps upload`).
 - An IIFE/UMD browser build for non-bundler `<script>` tag usage.
 - **`./core`** is not a host import. Use `.`, `./node`, or `./cloudflare`.
-- **Ruby / Rails** — `alplus-ruby` is the first-party gem. It is not this
+- **Ruby / Rails** — `postdeploy` is the first-party gem. It is not this
   npm package. Hex and RubyGems first publish is separate from this 0.3.x
   line.
 
