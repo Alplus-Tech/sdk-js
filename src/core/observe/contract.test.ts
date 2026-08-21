@@ -24,12 +24,13 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { __resetForTests, captureException, captureMessage, flush, init } from "./client";
+import { sendMeasureHit } from "../measure";
 
 // The golden contract is owned by the AL+ product (Alplus-Tech/alplus) and
 // consumed as an explicit, immutable input (issue #26): ALPLUS_CONTRACT_DIR
 // points at a checkout of `sdks/contract` at the pinned contract tag. There is
 // no monorepo-relative fallback -- an absent variable throws loudly.
-const CONTRACT_VERSION = "1.0.0";
+const CONTRACT_VERSION = "1.1.0";
 const NON_DETERMINISTIC_KEYS = ["id", "timestamp", "started_at", "duration_ms"];
 
 function contractDir(): string {
@@ -135,5 +136,23 @@ describe("golden envelope contract (issue #18), via the real init/capture*/flush
     await flush();
 
     expect(normalize(lastPostedItem(fetchImpl))).toEqual(normalize(golden("message_item.json")));
+  });
+
+  it("matches the golden Measure event", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({ ok: true, status: 204 } as Response);
+
+    await sendMeasureHit({
+      site: "msr_contract_site",
+      url: "https://app.example.test/pricing",
+      referrer: null,
+      type: "custom_event",
+      name: "signup",
+      props: { campaign: "contract-test", discarded: true },
+      fetchImpl,
+    });
+
+    const call = fetchImpl.mock.calls.at(-1)!;
+    const body = JSON.parse((call[1] as RequestInit).body as string) as Record<string, unknown>;
+    expect(body).toEqual(golden("measure_event.json"));
   });
 });
