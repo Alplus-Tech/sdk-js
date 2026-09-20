@@ -1,3 +1,5 @@
+import packageJson from "../../../package.json";
+import { SDK_VERSION } from "../version";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { __resetForTests, buildKeepaliveFlushRequest, captureException, captureMessage, close, flush, init, notifyLogBreadcrumb, setScopeProvider } from "./client";
 import { MAX_MESSAGE_CHARS } from "./envelope";
@@ -15,6 +17,12 @@ function lastBody(fetchImpl: ReturnType<typeof vi.fn>): Record<string, unknown> 
   const init = call?.[1] as RequestInit;
   return JSON.parse(init.body as string) as Record<string, unknown>;
 }
+
+describe("release metadata", () => {
+  it("keeps the emitted SDK version synchronized with package metadata", () => {
+    expect(SDK_VERSION).toBe(packageJson.version);
+  });
+});
 
 describe("captureException / captureMessage before init()", () => {
   afterEach(() => {
@@ -381,13 +389,56 @@ describe("Observe client", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
-  it("init() called twice reinitializes rather than throwing", () => {
+  it("rejects a key change until queued work is flushed under its original identity", async () => {
     const firstFetch = vi.fn().mockResolvedValue(okResponse());
     const secondFetch = vi.fn().mockResolvedValue(okResponse());
-    expect(() => {
-      init({ key: "alp_p_first", fetchImpl: firstFetch });
-      init({ key: "alp_p_second", fetchImpl: secondFetch });
-    }).not.toThrow();
+    init({ key: "alp_p_first", fetchImpl: firstFetch, autoFlushIntervalMs: 0 });
+    captureException(new Error("pending"));
+    captureMessage("queued");
+
+    expect(() =>
+      init({ key: "alp_p_second", fetchImpl: secondFetch, autoFlushIntervalMs: 0 }),
+    ).toThrow("Cannot change the Observe key while events are pending");
+
+    await flush();
+    expect(firstFetch).toHaveBeenCalledTimes(1);
+    expect(lastBody(firstFetch).header).toMatchObject({ key: "alp_p_first" });
+    expect(secondFetch).not.toHaveBeenCalled();
+
+    init({ key: "alp_p_second", fetchImpl: secondFetch, autoFlushIntervalMs: 0 });
+    captureMessage("new project");
+    await flush();
+    expect(lastBody(secondFetch).header).toMatchObject({ key: "alp_p_second" });
+  });
+
+  it("reinit keeps one in-flight owner and drains later work exactly once", async () => {
+    let resolveFirst: ((response: Response) => void) | undefined;
+    const firstFetch = vi.fn()
+      .mockImplementationOnce(
+        () => new Promise<Response>((resolve) => {
+          resolveFirst = resolve;
+        }),
+      )
+      .mockResolvedValue(okResponse());
+    const secondFetch = vi.fn().mockResolvedValue(okResponse());
+    init({ key: "alp_p_first", fetchImpl: firstFetch, postErrorLogWindowMs: 0 });
+
+    for (let index = 0; index < 10; index++) captureException(new Error(`first ${index}`));
+    captureException(new Error("after send started"));
+    expect(() =>
+      init({ key: "alp_p_second", fetchImpl: secondFetch, postErrorLogWindowMs: 0 }),
+    ).toThrow("Cannot change the Observe key while events are pending");
+
+    resolveFirst?.(okResponse());
+    await flush();
+
+    expect(firstFetch).toHaveBeenCalledTimes(2);
+    expect(secondFetch).not.toHaveBeenCalled();
+    const firstItems = firstFetch.mock.calls.flatMap((call) => {
+      const body = JSON.parse(String((call[1] as RequestInit).body)) as { items: unknown[] };
+      return body.items;
+    });
+    expect(firstItems).toHaveLength(11);
   });
 
   it("autoFlushIntervalMs: 0 disables the idle timer -- captures below the batch threshold never auto-send", async () => {
@@ -446,6 +497,36 @@ describe("Observe client", () => {
     expect(item.tags).toEqual({ plan: "agency" });
     expect((item.contexts as Record<string, unknown>).device).toEqual({ os: "mac" });
     expect(item.breadcrumbs).toEqual([expect.objectContaining({ category: "manual", message: "did a thing" })]);
+  });
+
+  it("recursively scrubs sensitive fields immediately before serialization", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(okResponse());
+    init({ key: "alp_p_test", fetchImpl });
+    captureException(new Error("boom"), {
+      contexts: {
+        request: {
+          Password: "secret",
+          nested: [{ api_key: "key" }, { authorization: "bearer" }],
+          safe: "visible",
+        },
+      },
+      breadcrumbs: [
+        { category: "request", message: "sent", data: { Cookie: "session", safe: true } },
+      ],
+    });
+
+    await flush();
+    const item = (lastBody(fetchImpl).items as Array<Record<string, unknown>>)[0]!;
+    expect(item.contexts).toEqual({
+      request: {
+        Password: "[FILTERED]",
+        nested: [{ api_key: "[FILTERED]" }, { authorization: "[FILTERED]" }],
+        safe: "visible",
+      },
+    });
+    expect(item.breadcrumbs).toEqual([
+      expect.objectContaining({ data: { Cookie: "[FILTERED]", safe: true } }),
+    ]);
   });
 
   it("captureMessage also accepts scope options", async () => {

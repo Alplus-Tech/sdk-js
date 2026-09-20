@@ -26,22 +26,33 @@ import { registerGlobalHandlers, unregisterGlobalHandlers } from "./global-handl
 import { configureScope } from "./scope";
 import { buildKeepaliveFlushRequest, close as coreClose, DEFAULT_MAX_BREADCRUMBS, init as coreInit, type ObserveInitOptions } from "../core/observe";
 
-let pagehideListenerRegistered = false;
+let pagehideListener: (() => void) | null = null;
+let pagehideDebug = false;
 
 function registerPagehideFlush(debug: boolean): void {
-  if (pagehideListenerRegistered) return;
+  pagehideDebug = debug;
+  if (pagehideListener !== null) return;
   if (typeof window === "undefined" || typeof window.addEventListener !== "function") return;
-  pagehideListenerRegistered = true;
 
-  window.addEventListener("pagehide", () => {
+  pagehideListener = () => {
     const request = buildKeepaliveFlushRequest();
     if (request === null) return;
     const fetchImpl = globalThis.fetch;
     if (typeof fetchImpl !== "function") return;
     fetchImpl(request.url, { method: "POST", headers: request.headers, body: request.body, keepalive: true }).catch((err: unknown) => {
-      if (debug) console.warn("[@postdeploy/sdk] observe: pagehide flush failed", err);
+      if (pagehideDebug) console.warn("[@postdeploy/sdk] observe: pagehide flush failed", err);
     });
-  });
+  };
+  window.addEventListener("pagehide", pagehideListener);
+}
+
+function unregisterPagehideFlush(): void {
+  if (pagehideListener === null) return;
+  if (typeof window !== "undefined" && typeof window.removeEventListener === "function") {
+    window.removeEventListener("pagehide", pagehideListener);
+  }
+  pagehideListener = null;
+  pagehideDebug = false;
 }
 
 /**
@@ -56,14 +67,19 @@ export function init(options: ObserveInitOptions): void {
   registerPagehideFlush(options.debug ?? false);
   configureScope(options.maxBreadcrumbs ?? DEFAULT_MAX_BREADCRUMBS);
   registerAutoBreadcrumbs();
-  if (options.captureUnhandled !== false) registerGlobalHandlers();
+  if (options.captureUnhandled !== false) {
+    registerGlobalHandlers();
+  } else {
+    unregisterGlobalHandlers();
+  }
 }
 
 /**
- * Detaches everything `init` attached (global handlers, breadcrumb
- * instrumentation), then flushes and closes the core client. Never throws.
+ * Detaches everything `init` attached, then flushes and closes the core
+ * client. Never throws.
  */
 export async function close(timeoutMs?: number): Promise<boolean> {
+  unregisterPagehideFlush();
   unregisterGlobalHandlers();
   unregisterAutoBreadcrumbs();
   return coreClose(timeoutMs);
@@ -71,5 +87,5 @@ export async function close(timeoutMs?: number): Promise<boolean> {
 
 /** Test-only: not re-exported from `./index.ts`, so it never reaches a published bundle. */
 export function __resetForTests(): void {
-  pagehideListenerRegistered = false;
+  unregisterPagehideFlush();
 }

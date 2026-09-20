@@ -96,14 +96,14 @@ describe("heartbeat", () => {
     expect(firstUrl.searchParams.get("ping_id")).not.toBeNull();
   });
 
-  it("resolves without throwing after exhausting all 3 attempts", async () => {
+  it("resolves without throwing after exhausting both attempts", async () => {
     const fetchImpl = vi.fn().mockRejectedValue(new Error("network down"));
 
     const promise = heartbeat("hb_abc123", { fetchImpl });
     await vi.runAllTimersAsync();
     await expect(promise).resolves.toBeUndefined();
 
-    expect(fetchImpl).toHaveBeenCalledTimes(3);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
   it("treats a non-ok response as a failure requiring retry", async () => {
@@ -116,19 +116,47 @@ describe("heartbeat", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
-  it("caps a 429 Retry-After delay at 30 seconds", async () => {
+  it("caps a 429 Retry-After delay at 2 seconds", async () => {
     vi.spyOn(Math, "random").mockReturnValue(0.5);
     const fetchImpl = vi.fn().mockResolvedValueOnce(errorResponse(429, "45")).mockResolvedValueOnce(okResponse());
 
     const promise = heartbeat("hb_abc123", { fetchImpl });
     await vi.advanceTimersByTimeAsync(0);
-    await vi.advanceTimersByTimeAsync(29_999);
+    await vi.advanceTimersByTimeAsync(1_999);
     expect(fetchImpl).toHaveBeenCalledTimes(1);
 
     await vi.advanceTimersByTimeAsync(1);
     await promise;
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
+  it("honors an integer Retry-After delay", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(0.5);
+    const fetchImpl = vi.fn().mockResolvedValueOnce(errorResponse(429, "1")).mockResolvedValueOnce(okResponse());
+
+    const promise = heartbeat("hb_abc123", { fetchImpl });
+    await vi.advanceTimersByTimeAsync(999);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(1);
+    await promise;
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(["1.5", "Wed, 21 Oct 2015 07:28:00 GMT"])(
+    "uses the default retry delay for a non-integer Retry-After value %s",
+    async (retryAfter) => {
+      vi.spyOn(Math, "random").mockReturnValue(0.5);
+      const fetchImpl = vi.fn().mockResolvedValueOnce(errorResponse(429, retryAfter)).mockResolvedValueOnce(okResponse());
+
+      const promise = heartbeat("hb_abc123", { fetchImpl });
+      await vi.advanceTimersByTimeAsync(499);
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(1);
+      await promise;
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+    }
+  );
 
   it("uses the default retry delay for an unparseable 429 Retry-After value", async () => {
     vi.spyOn(Math, "random").mockReturnValue(0.5);
@@ -158,7 +186,7 @@ describe("heartbeat", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
-  it.each([400, 401, 403, 404])("does not retry a permanent %i response", async (status) => {
+  it.each([400, 401, 403, 404, 409, 422])("does not retry a permanent %i response", async (status) => {
     const fetchImpl = vi.fn().mockResolvedValue(errorResponse(status));
 
     const promise = heartbeat("hb_abc123", { fetchImpl });
@@ -172,11 +200,12 @@ describe("heartbeat", () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const fetchImpl = vi.fn().mockRejectedValue(new Error("network down"));
 
-    const promise = heartbeat("hb_abc123", { fetchImpl, debug: true });
+    const promise = heartbeat("hb_secret_token", { fetchImpl, debug: true });
     await vi.runAllTimersAsync();
     await promise;
 
     expect(warnSpy).toHaveBeenCalled();
+    expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("hb_secret_token");
   });
 
   it("stays silent on final failure when debug is not set", async () => {

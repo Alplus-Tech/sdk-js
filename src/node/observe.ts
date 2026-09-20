@@ -89,7 +89,10 @@ function unregisterGlobalHandlers(): void {
 export function init(options: NodeObserveInitOptions): void {
   coreInit(options);
   configureScope({ maxBreadcrumbs: options.maxBreadcrumbs, debug: options.debug });
-  if (options.captureUnhandled === false) return;
+  if (options.captureUnhandled === false) {
+    unregisterGlobalHandlers();
+    return;
+  }
   const processImpl = options.processImpl ?? getGlobalProcess();
   if (processImpl === undefined) return;
   registerGlobalHandlers(processImpl, options.debug ?? false);

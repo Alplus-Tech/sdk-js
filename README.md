@@ -10,6 +10,9 @@ breadcrumbs, and scope (`setUser`/`setTag`/`setContext`) for Observe; and
 `sendMeasureHit()` (Measure, browser-only as of 0.3.0 — see below). See
 [Roadmap](#roadmap) below for what's not here yet.
 
+Setup guide: [JavaScript error tracking](https://postdeploy.dev/docs/observe/javascript).
+Heartbeat reference: [heartbeat protocol](https://postdeploy.dev/docs/monitoring/heartbeats).
+
 ## Install
 
 ```sh
@@ -110,15 +113,16 @@ await heartbeat(token, options?);
 | `state` | `"start" \| "finish" \| "fail"` | _(none — a plain ping)_ | `start` records the beginning of a run so the console can track its duration. `finish` closes it out as a success. `fail` **opens an incident immediately** on the monitor. Mutually exclusive with `exitCode`. |
 | `exitCode` | `number` | _(none)_ | Shortcut for `state`: `0` maps to `finish`, any value `1`-`255` maps to `fail`. Mutually exclusive with `state`. |
 | `message` | `string` | _(none)_ | Diagnostic text attached to `fail` pings, shown on the incident in the console. Silently truncated to 2048 characters. |
-| `pingId` | `string` | a fresh generated id | Idempotency key, reused across retries of one call. |
+| `pingId` | `string` | a fresh generated id | Idempotency key, reused across retries of one call and deduplicated by the monitor for 24 hours. |
 | `baseUrl` | `string` | `https://ingest.postdeploy.dev` | Override the ingest origin. |
 | `fetchImpl` | `typeof fetch` | the platform's global `fetch` | Inject a custom `fetch` implementation — primarily for unit tests. |
-| `debug` | `boolean` | `false` | Log a `console.warn` when retries are exhausted or an internal error occurs. |
+| `debug` | `boolean` | `false` | Log a `console.warn` when retries are exhausted or an internal error occurs. Tokens are always redacted. |
 
 `heartbeat()` **never throws or rejects**, regardless of network failure or
-an internal SDK bug — every ping is attempted up to 3 times total with
-jittered exponential backoff, and failures are swallowed after retries are
-exhausted (set `debug: true` to log them instead).
+an internal SDK bug. It makes at most two attempts. It retries transport
+failures, `408`, `429`, and `5xx` responses only. Each attempt is bounded to
+five seconds. A delta-seconds `Retry-After` is capped at two seconds; other
+retries use jittered backoff around 500ms.
 
 ## Observe: error tracking
 
@@ -141,10 +145,11 @@ captureMessage("payment webhook received an unexpected status", "warning");
 await flush(2000);
 ```
 
-`init(options)` configures a single module-scope client (call it once per
-process/isolate; calling it again reinitializes rather than throwing).
-`key` must be a project API key with the `ingest` scope. `captureUnhandled`
-(default `true` on browser/Node) controls automatic capture — see below.
+`init(options)` configures one module-scope client. Repeated calls update the
+active client without discarding pending, queued, or in-flight events.
+Calling `init` after `close` starts a new active client. `key` must be a
+project API key with the `ingest` scope. `captureUnhandled` (default `true` on
+browser/Node) controls automatic capture — see below.
 
 `captureException(error, options?)` accepts any thrown value — an `Error`,
 a string, or anything else JavaScript allows you to `throw`. A non-`Error`
@@ -166,9 +171,9 @@ one event and returns the same id both times.
 `captureException`.
 
 `flush(timeoutMs?)` (default 2000ms) forces an immediate send and resolves
-`true` if it drained in time. `close(timeoutMs?)` detaches automatic
-capture/breadcrumb instrumentation, flushes, and then makes further capture
-calls no-ops for the rest of the process.
+`true` if it drained in time. `close(timeoutMs?)` detaches automatic capture,
+breadcrumb instrumentation, and the browser `pagehide` callback. It flushes
+the closing client and rejects further captures until the next `init`.
 
 Every capture/transport path is wrapped so **the SDK never throws into your
 application** — a malformed capture, a network failure, or an internal bug
@@ -312,12 +317,13 @@ exception `value`, stack traces, context objects) are capped at the same
 boundary the server enforces, so an oversized payload is trimmed by the SDK
 rather than discovered by a server rejection.
 
-- **Browser** (`.`): the 5-second idle timer applies, plus a `pagehide`
+- **Browser** (`.`): the 5-second idle timer applies, plus one `pagehide`
   listener that best-effort flushes any remaining queue via
   `fetch(..., { keepalive: true })` when the page is closed or bfcache'd.
-  (This uses `fetch` keepalive rather than `navigator.sendBeacon`, because
-  `sendBeacon` cannot carry the `Authorization` header this endpoint
-  requires.)
+  `close` removes that exact callback, so a close/reinit cycle leaves one
+  current handler. (This uses `fetch` keepalive rather than
+  `navigator.sendBeacon`, because `sendBeacon` cannot carry the
+  `Authorization` header this endpoint requires.)
 - **Node** (`/node`): the 5-second idle timer applies, and is `unref()`'d so
   it never keeps a short-lived script running on its own — call `flush()` or
   `close()` before your script exits, or a queued batch waiting on the timer

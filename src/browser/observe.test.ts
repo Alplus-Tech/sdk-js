@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { __resetForTests, captureException } from "../core/observe/client";
 import { unregisterAutoBreadcrumbs } from "./auto-breadcrumbs";
 import { unregisterGlobalHandlers } from "./global-handlers";
-import { __resetForTests as __resetBrowserObserveForTests, init } from "./observe";
+import { __resetForTests as __resetBrowserObserveForTests, close, init } from "./observe";
 
 /**
  * The vitest project this package runs under uses `environment: "node"`
@@ -25,6 +25,7 @@ function fakeWindow() {
     fire(event: string) {
       for (const handler of listeners[event] ?? []) handler();
     },
+    listeners,
     document: {},
   };
 }
@@ -89,6 +90,62 @@ describe("browser Observe init", () => {
     init({ key: "alp_p_second", fetchImpl });
 
     expect(pagehideCallCount(win)).toBe(1);
+  });
+  it("unregisters global error handlers when reinit disables captureUnhandled", () => {
+    const win = fakeWindow();
+    vi.stubGlobal("window", win);
+
+    init({ key: "alp_p_first", fetchImpl: vi.fn() });
+    expect(win.listeners.error ?? []).toHaveLength(1);
+    expect(win.listeners.unhandledrejection ?? []).toHaveLength(1);
+
+    init({ key: "alp_p_second", captureUnhandled: false, fetchImpl: vi.fn() });
+
+    expect(win.listeners.error ?? []).toHaveLength(0);
+    expect(win.listeners.unhandledrejection ?? []).toHaveLength(0);
+    expect(
+      win.removeEventListener.mock.calls.filter(([event]) =>
+        event === "error" || event === "unhandledrejection"
+      )
+    ).toHaveLength(2);
+  });
+
+  it("test reset removes the registered pagehide callback", () => {
+    const win = fakeWindow();
+    vi.stubGlobal("window", win);
+
+    init({ key: "alp_p_test", fetchImpl: vi.fn() });
+    __resetBrowserObserveForTests();
+
+    expect(win.removeEventListener).toHaveBeenCalledTimes(1);
+    expect(win.listeners.pagehide ?? []).toHaveLength(0);
+  });
+
+  it("close removes the actual pagehide callback and reinit leaves one current handler", async () => {
+    const win = fakeWindow();
+    vi.stubGlobal("window", win);
+    const fetchImpl = vi.fn().mockResolvedValue({ ok: true, status: 202, headers: new Headers() } as Response);
+    vi.stubGlobal("fetch", fetchImpl);
+
+    init({ key: "alp_p_first", fetchImpl, postErrorLogWindowMs: 0 });
+    captureException(new Error("first"));
+    await close();
+
+    expect(win.listeners.pagehide ?? []).toHaveLength(0);
+
+    init({ key: "alp_p_second", fetchImpl, postErrorLogWindowMs: 0 });
+    captureException(new Error("second"));
+    expect(win.listeners.pagehide ?? []).toHaveLength(1);
+
+    win.fire("pagehide");
+    await vi.runAllTimersAsync();
+
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    const sentItems = fetchImpl.mock.calls.flatMap((call) => {
+      const body = JSON.parse((call[1] as RequestInit).body as string) as { items: unknown[] };
+      return body.items;
+    });
+    expect(sentItems).toHaveLength(2);
   });
 
   it("does not throw when there is no window global at all", () => {

@@ -30,19 +30,17 @@ import { sendMeasureHit } from "../measure";
 // consumed as an explicit, immutable input (issue #26): ALPLUS_CONTRACT_DIR
 // points at a checkout of `sdks/contract` at the pinned contract tag. There is
 // no monorepo-relative fallback -- an absent variable throws loudly.
-const CONTRACT_VERSION = "1.1.0";
-const NON_DETERMINISTIC_KEYS = ["id", "timestamp", "started_at", "duration_ms"];
+const CONTRACT_VERSION = "2.0.0";
+const NON_DETERMINISTIC_KEYS = ["id", "timestamp"];
+const EXPECTED_DIGESTS: Record<string, string> = {
+  "exception_item.json": "sha256:a970a83c0b7f8a1d74b8602afd886941634c711e600e41e2dc6ea579f868a380",
+  "message_item.json": "sha256:0f14c4f20605fed9a844646905047835033a7c6ade38fc1cb1d7da0158362e8f",
+  "measure_event.json": "sha256:132914d7468c8909baad2509bfb17de8ee30d585259c783a72d21f9446b6a483",
+  "session_item.json": "sha256:3bfe1d1458a03a3ced1b725c86d2a9aabbd57129f7aeb6a529d2d923ede8ec40",
+};
+
 
 function contractDir(): string {
-  if (!process.env.ALPLUS_CONTRACT_DIR) {
-    const fallback = new URL("../../../../../sdks/contract", import.meta.url);
-    const { existsSync } = require("node:fs") as typeof import("node:fs");
-    const { fileURLToPath } = require("node:url") as typeof import("node:url");
-    const candidate = fileURLToPath(fallback);
-    if (existsSync(`${candidate}/manifest.json`)) {
-      process.env.ALPLUS_CONTRACT_DIR = candidate;
-    }
-  }
   const dir = process.env.ALPLUS_CONTRACT_DIR;
   if (!dir) {
     throw new Error(
@@ -58,7 +56,19 @@ function contractDir(): string {
   if (manifest.version !== CONTRACT_VERSION) {
     throw new Error(`contract version mismatch: pinned ${CONTRACT_VERSION}, got ${manifest.version}`);
   }
-  for (const [name, expected] of Object.entries(manifest.items)) {
+  const checksumFile = Object.fromEntries(
+    readFileSync(`${dir}/SHA256SUMS`, "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => {
+        const [digest, name] = line.trim().split(/\s+/, 2);
+        return [name, `sha256:${digest}`];
+      }),
+  ) as Record<string, string>;
+  for (const [name, expected] of Object.entries(EXPECTED_DIGESTS)) {
+    if (manifest.items[name] !== expected || checksumFile[name] !== expected) {
+      throw new Error(`contract digest pin mismatch for ${name}`);
+    }
     const actual = `sha256:${createHash("sha256").update(readFileSync(`${dir}/${name}`)).digest("hex")}`;
     if (actual !== expected) {
       throw new Error(`contract checksum mismatch for ${name}: expected ${expected}, got ${actual}`);

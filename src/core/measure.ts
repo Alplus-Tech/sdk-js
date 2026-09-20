@@ -111,8 +111,10 @@ export async function sendMeasureHit(options: MeasureHitOptions): Promise<void> 
     const baseUrl = (options.baseUrl ?? DEFAULT_BASE_URL).replace(/\/+$/, "");
     await fetchImpl(`${baseUrl}/m`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "text/plain;charset=UTF-8" },
       body: buildBody(options),
+      mode: "no-cors",
+      credentials: "omit",
       signal: timeoutSignal(),
     });
   } catch (err) {

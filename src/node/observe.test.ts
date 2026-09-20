@@ -94,6 +94,18 @@ describe("node Observe: automatic global error capture (section 2)", () => {
     expect(proc.listenerCount("unhandledRejection")).toBe(0);
   });
 
+  it("reinit with captureUnhandled: false detaches existing process listeners", () => {
+    const proc = fakeProcess();
+    const fetchImpl = vi.fn().mockResolvedValue(okResponse());
+    init({ key: "alp_p_test", fetchImpl, processImpl: proc });
+    expect(proc.listenerCount("uncaughtException")).toBe(1);
+    expect(proc.listenerCount("unhandledRejection")).toBe(1);
+
+    init({ key: "alp_p_test", fetchImpl, processImpl: proc, captureUnhandled: false });
+    expect(proc.listenerCount("uncaughtException")).toBe(0);
+    expect(proc.listenerCount("unhandledRejection")).toBe(0);
+  });
+
   it("close() detaches the process listeners", async () => {
     const proc = fakeProcess();
     init({ key: "alp_p_test", fetchImpl: vi.fn().mockResolvedValue(okResponse()), processImpl: proc });

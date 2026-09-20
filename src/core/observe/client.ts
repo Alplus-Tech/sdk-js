@@ -62,6 +62,33 @@ export function setScopeProvider(provider: ScopeProvider | null): void {
 const DEFAULT_BASE_URL = "https://ingest.postdeploy.dev";
 const DEFAULT_FLUSH_TIMEOUT_MS = 2_000;
 
+const SENSITIVE_KEY_PARTS = [
+  "password",
+  "passwd",
+  "secret",
+  "token",
+  "api_key",
+  "apikey",
+  "authorization",
+  "cookie",
+] as const;
+const FILTERED = "[FILTERED]";
+
+function scrubSensitive<T>(value: T): T {
+  if (Array.isArray(value)) {
+    return value.map((entry) => scrubSensitive(entry)) as T;
+  }
+  if (value === null || typeof value !== "object") return value;
+
+  return Object.fromEntries(
+    Object.entries(value).map(([key, entry]) => [
+      key,
+      SENSITIVE_KEY_PARTS.some((part) => key.toLowerCase().includes(part))
+        ? FILTERED
+        : scrubSensitive(entry),
+    ]),
+  ) as T;
+}
 export interface ObserveInitOptions {
   /** Project API key, e.g. `"alp_p_..."`. Must carry the `ingest` scope. Required. */
   key: string;
@@ -303,7 +330,7 @@ function enqueue(s: ObserveState, item: WireErrorItem): void {
 function buildEnvelope(s: ObserveState, items: WireErrorItem[]): Record<string, unknown> {
   return {
     header: { key: s.key, sdk: { name: SDK_NAME, version: SDK_VERSION, platform: detectPlatform() }, sent_at: new Date().toISOString() },
-    items,
+    items: items.map((item) => scrubSensitive(item)),
   };
 }
 
@@ -363,20 +390,38 @@ function triggerFlush(s: ObserveState): Promise<void> {
 }
 
 /**
- * Initializes (or reinitializes) the Observe client. Safe to call more than
- * once per process/isolate -- a second call reinitializes with the new
- * options rather than throwing, logging a debug warning if `debug: true`.
+ * Initializes the Observe client. Repeated initialization may update transport
+ * settings in place. Changing the key while work is pending is rejected so an
+ * event can never move to another project; flush or close first.
+ * Initialization after `close()` starts a new active state.
  */
 export function init(options: ObserveInitOptions): void {
-  if (state !== null && options.debug === true) {
-    debugWarn("init() called again; reinitializing the client with the new options.");
-  }
-  if (state !== null) clearTimer(state);
-
-  if (state !== null) sealAllPending(state);
-
   const autoFlushIntervalMs = options.autoFlushIntervalMs ?? BATCH_FLUSH_MS;
-  const next: ObserveState = {
+  const postErrorLogWindowMs = Math.max(0, Math.min(options.postErrorLogWindowMs ?? DEFAULT_POST_ERROR_LOG_WINDOW_MS, BATCH_FLUSH_MS));
+
+  if (state !== null && !state.closed) {
+    if (
+      options.key !== state.key &&
+      (state.pending.length > 0 || state.queue.length > 0 || state.inFlight !== null)
+    ) {
+      throw new Error("Cannot change the Observe key while events are pending; flush or close first.");
+    }
+
+    if (options.debug === true) debugWarn("init() called again; updating the active client without discarding work.");
+    clearTimer(state);
+    state.key = options.key;
+    state.environment = options.environment ?? "production";
+    state.release = options.release;
+    state.baseUrl = (options.baseUrl ?? DEFAULT_BASE_URL).replace(/\/+$/, "");
+    state.fetchImpl = options.fetchImpl ?? globalThis.fetch;
+    state.debug = options.debug ?? false;
+    state.autoFlushIntervalMs = autoFlushIntervalMs;
+    state.postErrorLogWindowMs = postErrorLogWindowMs;
+    if (state.queue.length > 0 && state.inFlight === null && autoFlushIntervalMs > 0) scheduleTimer(state);
+    return;
+  }
+
+  state = {
     key: options.key,
     environment: options.environment ?? "production",
     release: options.release,
@@ -384,7 +429,7 @@ export function init(options: ObserveInitOptions): void {
     fetchImpl: options.fetchImpl ?? globalThis.fetch,
     debug: options.debug ?? false,
     autoFlushIntervalMs,
-    postErrorLogWindowMs: Math.max(0, Math.min(options.postErrorLogWindowMs ?? DEFAULT_POST_ERROR_LOG_WINDOW_MS, BATCH_FLUSH_MS)),
+    postErrorLogWindowMs,
     queue: [],
     queuedBytes: 0,
     pending: [],
@@ -392,7 +437,6 @@ export function init(options: ObserveInitOptions): void {
     timer: null,
     closed: false,
   };
-  state = next;
 }
 
 function normalizeError(error: unknown): { type: string; value: string | undefined; frames: ReturnType<typeof parseStack>; nonErrorValue: unknown } {
@@ -607,18 +651,21 @@ export async function flush(timeoutMs: number = DEFAULT_FLUSH_TIMEOUT_MS): Promi
 }
 
 /**
- * Flushes, then stops the client from accepting further events for the
- * remainder of the process; capture calls after `close` are no-ops (logged
- * in debug mode). Never throws.
+ * Stops this client instance from accepting new events, then drains its work.
+ * Marking the captured instance closed before awaiting lets a concurrent
+ * `init()` create a new owner without that new state being closed afterward.
  */
 export async function close(timeoutMs: number = DEFAULT_FLUSH_TIMEOUT_MS): Promise<boolean> {
   if (state === null) return true;
-  const ok = await flush(timeoutMs);
-  if (state !== null) {
-    clearTimer(state);
-    state.closed = true;
-  }
-  return ok;
+  const closing = state;
+  closing.closed = true;
+  sealAllPending(closing);
+  clearTimer(closing);
+  const pending = triggerFlush(closing);
+  const timedOut = Symbol("observe-close-timeout");
+  const result = await Promise.race([pending.then(() => "done" as const), delay(timeoutMs).then(() => timedOut)]);
+  clearTimer(closing);
+  return result !== timedOut;
 }
 
 /**

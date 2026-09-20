@@ -18,8 +18,10 @@ describe("sendMeasureHit", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1);
     const [url, requestInit] = fetchImpl.mock.calls[0]! as [string, RequestInit];
     expect(url).toBe("https://ingest.postdeploy.dev/m");
-    expect((requestInit.headers as Record<string, string>)["Content-Type"]).toBe("application/json");
+    expect((requestInit.headers as Record<string, string>)["Content-Type"]).toBe("text/plain;charset=UTF-8");
     expect(requestInit.headers).not.toHaveProperty("Origin");
+    expect(requestInit.mode).toBe("no-cors");
+    expect(requestInit.credentials).toBe("omit");
 
     const body = JSON.parse(requestInit.body as string) as Record<string, unknown>;
     expect(body).toEqual({ site: "proj_abc", url: "https://shop.example.com/pricing", referrer: null, type: "pageview" });

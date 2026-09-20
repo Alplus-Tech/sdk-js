@@ -18,21 +18,30 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # Pinned contract version. Bump only through a product sdk-compat change.
-  CONTRACT_REF: contract-v1.1.0
+  # Immutable product commit containing contract v2.0.0. Configure this
+  # repository variable after the product contract commit exists.
+  CONTRACT_COMMIT: ${{ vars.CONTRACT_V2_COMMIT }}
 
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Validate immutable contract commit
+        shell: bash
+        run: |
+          if [[ ! "$CONTRACT_COMMIT" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "::error::CONTRACT_V2_COMMIT must be a full 40-hex product commit SHA"
+            exit 1
+          fi
+
 
       # Fetch the pinned, server-owned contract fixtures (explicit input).
       - name: Check out the pinned contract
         uses: actions/checkout@v4
         with:
           repository: Alplus-Tech/alplus
-          ref: ${{ env.CONTRACT_REF }}
+          ref: ${{ env.CONTRACT_COMMIT }}
           # Read-only, fine-grained token scoped to the product contract. Set as
           # a repository secret in Alplus-Tech/sdk-js.
           token: ${{ secrets.CONTRACT_REPO_TOKEN }}

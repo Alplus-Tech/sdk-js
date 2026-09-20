@@ -311,7 +311,7 @@ describe("browser instrumentation", () => {
       const call = fetchImpl.mock.calls.find(([url]) => url === "https://ingest.postdeploy.dev/e/errors");
       const body = JSON.parse((call![1] as RequestInit).body as string) as { items: Array<{ breadcrumbs?: Array<{ data?: Record<string, unknown> }> }> };
       const crumb = body.items[0]!.breadcrumbs!.find((b) => b.data !== undefined)!;
-      expect(crumb.data!.password).toBe("[Redacted]");
+      expect(crumb.data!.password).toBe("[FILTERED]");
       expect(crumb.data!.safe).toBe("ok");
     });
   });
