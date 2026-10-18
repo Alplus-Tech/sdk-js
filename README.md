@@ -1,5 +1,7 @@
 # @postdeploy/sdk
 
+> **Retired.** This SDK is no longer maintained and receives no updates. PostDeploy accepts events from the official Sentry SDKs. Install `@sentry/node` and use the DSN that PostDeploy shows for your source. See https://postdeploy.dev/docs.
+
 Official instrumentation SDK for [PostDeploy](https://postdeploy.dev), the
 Cloudflare-native dev toolkit built around three pillars — **Monitor**
 (uptime and heartbeat checks), **Observe** (error tracking), and **Measure**
