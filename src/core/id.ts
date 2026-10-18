@@ -25,8 +25,7 @@ function randomBytes16(): Uint8Array {
   // Fallback for environments without a global Web Crypto object (older
   // Node < 19 without --experimental-global-webcrypto). Not
   // cryptographically strong, but this id is a correlation/idempotency key,
-  // never a security token, matching the same trade-off `heartbeat.ts`
-  // already makes for its ping ids.
+  // never a security token.
   for (let i = 0; i < bytes.length; i += 1) {
     bytes[i] = Math.floor(Math.random() * 256);
   }

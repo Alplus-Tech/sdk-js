@@ -1,7 +1,7 @@
 {
   "name": "@postdeploy/sdk",
   "version": "0.6.0",
-  "description": "Official SDK for PostDeploy: errors, analytics, and cron monitoring after deployment.",
+  "description": "Official SDK for PostDeploy: error tracking after deployment.",
   "license": "MIT",
   "type": "module",
   "sideEffects": false,
@@ -9,15 +9,9 @@
     "node": ">=18"
   },
   "keywords": [
-    "uptime",
-    "cron",
-    "heartbeat",
-    "monitoring",
-    "cloudflare-workers",
-    "healthcheck",
     "error-tracking",
     "observability",
-    "analytics"
+    "cloudflare-workers"
   ],
   "repository": {
     "type": "git",

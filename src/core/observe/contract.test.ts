@@ -15,16 +15,11 @@
  * see the contract README's "why literal frames" note. Every other field
  * (type/value/tags/contexts/user/breadcrumbs/fingerprint/mechanism) goes
  * through the real, unmodified assembly code.
- *
- * No session item here: `packages/sdk` has no `POST /e/sessions` builder
- * (see the contract README's "known gap"). Session is covered by the
- * monolith's server anchor and the Elixir/Ruby SDKs.
  */
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { __resetForTests, captureException, captureMessage, flush, init } from "./client";
-import { sendMeasureHit } from "../measure";
 
 // The golden contract is owned by the PostDeploy product (Alplus-Tech/alplus) and
 // consumed as an explicit, immutable input (issue #26): ALPLUS_CONTRACT_DIR
@@ -35,8 +30,6 @@ const NON_DETERMINISTIC_KEYS = ["id", "timestamp"];
 const EXPECTED_DIGESTS: Record<string, string> = {
   "exception_item.json": "sha256:a970a83c0b7f8a1d74b8602afd886941634c711e600e41e2dc6ea579f868a380",
   "message_item.json": "sha256:0f14c4f20605fed9a844646905047835033a7c6ade38fc1cb1d7da0158362e8f",
-  "measure_event.json": "sha256:132914d7468c8909baad2509bfb17de8ee30d585259c783a72d21f9446b6a483",
-  "session_item.json": "sha256:3bfe1d1458a03a3ced1b725c86d2a9aabbd57129f7aeb6a529d2d923ede8ec40",
 };
 
 
@@ -146,23 +139,5 @@ describe("golden envelope contract (issue #18), via the real init/capture*/flush
     await flush();
 
     expect(normalize(lastPostedItem(fetchImpl))).toEqual(normalize(golden("message_item.json")));
-  });
-
-  it("matches the golden Measure event", async () => {
-    const fetchImpl = vi.fn().mockResolvedValue({ ok: true, status: 204 } as Response);
-
-    await sendMeasureHit({
-      site: "msr_contract_site",
-      url: "https://app.example.test/pricing",
-      referrer: null,
-      type: "custom_event",
-      name: "signup",
-      props: { campaign: "contract-test", discarded: true },
-      fetchImpl,
-    });
-
-    const call = fetchImpl.mock.calls.at(-1)!;
-    const body = JSON.parse((call[1] as RequestInit).body as string) as Record<string, unknown>;
-    expect(body).toEqual(golden("measure_event.json"));
   });
 });

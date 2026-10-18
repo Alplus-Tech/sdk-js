@@ -14,17 +14,8 @@
  * per capture instead -- `captureException`/`captureMessage`'s options
  * accept all four directly, which is the one mechanism that is always safe
  * regardless of isolate concurrency.
- *
- * `sendMeasureHit` is NOT exported from this entry point (docs/sdk/
- * 02-dx-improvements.md section 5): `POST /m`'s only auth is a browser's own
- * `Origin` header, which a Workers-originated `fetch` never carries, so
- * calling it from here always silently records nothing. Use the `/m.js`
- * browser tracker instead (see README).
  */
 import { init as coreInit, type ObserveInitOptions } from "../core/observe";
-
-export { heartbeat } from "../core/heartbeat";
-export type { HeartbeatOptions } from "../core/heartbeat";
 
 export { captureException, captureMessage, flush, close } from "../core/observe";
 export type { ObserveInitOptions, CaptureExceptionOptions, CaptureMessageOptions, ErrorLevel, WireUser } from "../core/observe";

@@ -6,10 +6,10 @@
  * isolates, long-lived Node processes, and browser tabs have very different
  * lifetimes.
  *
- * State is a single module-level singleton, matching `heartbeat.ts`'s
- * platform-neutral design and the SDK spec's "a module-scope `init()` call
- * is correct and recommended" guidance -- one client per process/isolate,
- * calling `init` again reinitializes it rather than creating a second one.
+ * State is a single module-level singleton, matching the SDK spec's "a
+ * module-scope `init()` call is correct and recommended" guidance -- one
+ * client per process/isolate, calling `init` again reinitializes it rather
+ * than creating a second one.
  */
 
 import { generateEventId } from "../id";

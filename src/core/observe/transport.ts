@@ -1,12 +1,4 @@
-/**
- * `POST /e/errors` transport: retry/backoff and 429 handling. Deliberately
- * NOT shared with `heartbeat.ts`'s near-identical retry loop -- the two
- * differ in POST body/headers and heartbeat is a shipped, load-bearing
- * function this change must not touch (see this package's top-level
- * README/AGENTS.md "never-throw guarantee"); duplicating ~30 lines is
- * cheaper than the regression risk of extracting a shared helper underneath
- * it.
- */
+/** `POST /e/errors` transport: retry/backoff and 429 handling. */
 
 const MAX_ATTEMPTS = 3;
 const BACKOFF_BASE_MS = 500;
